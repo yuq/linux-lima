@@ -9,7 +9,6 @@
  * - MAC filtering
  * - Jumbo frame
  * - features rx-all (NETIF_F_RXALL_BIT)
- * - PM runtime
  */
 #include <linux/bitops.h>
 #include <linux/clk.h>
@@ -27,6 +26,7 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/scatterlist.h>
@@ -1334,9 +1334,16 @@ static int sun8i_emac_open(struct net_device *ndev)
 	int err;
 	u32 v;
 
+	err = pm_runtime_get_sync(priv->dev);
+	if (err) {
+		pm_runtime_put_noidle(priv->dev);
+		dev_err(priv->dev, "pm_runtime error: %d\n", err);
+		return err;
+	}
+
 	err = sun8i_emac_power(ndev);
 	if (err)
-		return err;
+		goto err_runtime;
 
 	err = request_irq(priv->irq, sun8i_emac_dma_interrupt, 0,
 			  dev_name(priv->dev), ndev);
@@ -1434,6 +1441,8 @@ err_irq:
 	free_irq(priv->irq, ndev);
 err_power:
 	sun8i_emac_unpower(ndev);
+err_runtime:
+	pm_runtime_put(priv->dev);
 	return err;
 }
 
@@ -1523,6 +1532,8 @@ static int sun8i_emac_stop(struct net_device *ndev)
 			  priv->dd_tx, priv->dd_tx_phy);
 
 	sun8i_emac_unpower(ndev);
+
+	pm_runtime_put(priv->dev);
 
 	return 0;
 }
@@ -2275,6 +2286,8 @@ static int sun8i_emac_probe(struct platform_device *pdev)
 		goto probe_err;
 	}
 
+	pm_runtime_enable(priv->dev);
+
 	return 0;
 
 probe_err:
@@ -2286,6 +2299,8 @@ static int sun8i_emac_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct sun8i_emac_priv *priv = netdev_priv(ndev);
+
+	pm_runtime_disable(&pdev->dev);
 
 	unregister_netdev(ndev);
 
