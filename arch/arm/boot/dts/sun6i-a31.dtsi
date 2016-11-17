@@ -561,6 +561,7 @@
 				allwinner,function = "mmc0";
 				allwinner,drive = <SUN4I_PINCTRL_30_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			mmc1_pins_a: mmc1@0 {
@@ -569,6 +570,7 @@
 				allwinner,function = "mmc1";
 				allwinner,drive = <SUN4I_PINCTRL_30_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			mmc2_pins_a: mmc2@0 {
@@ -587,6 +589,7 @@
 				allwinner,function = "mmc2";
 				allwinner,drive = <SUN4I_PINCTRL_30_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			mmc3_8bit_emmc_pins: mmc3@1 {
@@ -597,6 +600,7 @@
 				allwinner,function = "mmc3";
 				allwinner,drive = <SUN4I_PINCTRL_40_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			uart0_pins_a: uart0@0 {

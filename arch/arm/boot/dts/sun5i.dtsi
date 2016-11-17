@@ -591,6 +591,7 @@
 				allwinner,function = "mmc0";
 				allwinner,drive = <SUN4I_PINCTRL_30_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			mmc2_pins_a: mmc2@0 {

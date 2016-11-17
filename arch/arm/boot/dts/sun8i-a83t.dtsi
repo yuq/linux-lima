@@ -172,6 +172,7 @@
 				allwinner,function = "mmc0";
 				allwinner,drive = <SUN4I_PINCTRL_30_MA>;
 				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+				bias-pull-up;
 			};
 
 			uart0_pins_a: uart0@0 {
