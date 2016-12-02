@@ -86,3 +86,8 @@
 	/* eMMC is missing pull-ups */
 	allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
 };
+
+&emac {
+	/* LEDs changed to active high on the plus */
+	/delete-property/ allwinner,leds-active-low;
+};
