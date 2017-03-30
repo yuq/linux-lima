@@ -1,5 +1,6 @@
 #include <linux/reset.h>
 #include <linux/clk.h>
+#include <linux/dma-mapping.h>
 
 #include "lima.h"
 
@@ -99,6 +100,8 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 	ldev->dev = &dev->platformdev->dev;
 	ldev->ddev = dev;
 
+	dma_set_coherent_mask(ldev->dev, DMA_BIT_MASK(32));
+
 	ldev->gpu_type = GPU_MALI400;
 
 	np = ldev->dev->of_node;
@@ -117,6 +120,14 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 		dev_err(ldev->dev, "clk init fail %d\n", err);
 		return err;
 	}
+
+	ldev->empty_mmu_pda = dma_alloc_wc(ldev->dev, PAGE_SIZE,
+					   &ldev->empty_mmu_pda_dma, GFP_KERNEL);
+	if (!ldev->empty_mmu_pda) {
+		err = -ENOMEM;
+		goto err_out;
+	}
+	memset(ldev->empty_mmu_pda, 0, PAGE_SIZE);
 
 	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
 	if (!ldev->pmu) {
@@ -234,6 +245,11 @@ void lima_device_fini(struct lima_device *ldev)
 	if (ldev->pmu) {
 		lima_pmu_fini(ldev->pmu);
 		kfree(ldev->pmu);
+	}
+
+	if (ldev->empty_mmu_pda) {
+		dma_free_wc(ldev->dev, PAGE_SIZE, ldev->empty_mmu_pda,
+			    ldev->empty_mmu_pda_dma);
 	}
 
 	lima_clk_fini(ldev);

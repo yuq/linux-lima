@@ -84,6 +84,9 @@ struct lima_device {
 
 	struct lima_pp *pp[LIMA_MAX_PP];
 	int num_pp;
+
+	void *empty_mmu_pda;
+	dma_addr_t empty_mmu_pda_dma;
 };
 
 int lima_device_init(struct lima_device *ldev, struct drm_device *dev);
