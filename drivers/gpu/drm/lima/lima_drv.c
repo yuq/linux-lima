@@ -20,6 +20,16 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
 	return 0;
 }
 
+static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_gem_create *args = data;
+
+	if (args->flags)
+		return -EINVAL;
+
+	return lima_gem_create_handle(dev, file, args->size, args->flags, &args->handle);
+}
+
 static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct lima_device *ldev;
@@ -57,7 +67,8 @@ static int lima_drm_driver_unload(struct drm_device *dev)
 }
 
 static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
-        DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_GEM_CREATE, lima_ioctl_gem_create, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 static const struct file_operations lima_drm_driver_fops = {
@@ -71,12 +82,13 @@ static const struct file_operations lima_drm_driver_fops = {
 };
 
 static struct drm_driver lima_drm_driver = {
-	.driver_features    = DRIVER_RENDER,
+	.driver_features    = DRIVER_RENDER | DRIVER_GEM,
 	.load		    = lima_drm_driver_load,
 	.unload             = lima_drm_driver_unload,
 	.ioctls             = lima_drm_driver_ioctls,
 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
 	.fops               = &lima_drm_driver_fops,
+	.gem_free_object_unlocked = lima_gem_free_object,
 	.name               = "lima",
 	.desc               = "lima DRM",
 	.date               = "20170325",
