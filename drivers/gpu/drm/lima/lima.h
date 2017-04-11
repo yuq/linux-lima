@@ -107,4 +107,8 @@ void lima_gp_fini(struct lima_gp *gp);
 int lima_pp_init(struct lima_pp *pp);
 void lima_pp_fini(struct lima_pp *pp);
 
+int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
+			   u32 size, u32 flags, u32 *handle);
+void lima_gem_free_object(struct drm_gem_object *obj);
+
 #endif
