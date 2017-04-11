@@ -21,3 +21,4 @@ obj-$(CONFIG_DRM_SUN4I)		+= sun4i_tv.o
 obj-$(CONFIG_DRM_SUN4I_BACKEND)		+= sun4i-backend.o
 obj-$(CONFIG_DRM_SUN4I_HDMI)	+= sun4i-drm-hdmi.o
 obj-$(CONFIG_DRM_SUN8I_MIXER)		+= sun8i-mixer.o
+obj-$(CONFIG_DRM_SUN8I_DW_HDMI)	+= sun8i_dw_hdmi.o
