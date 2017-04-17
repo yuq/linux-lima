@@ -4,10 +4,15 @@
 
 #include "lima.h"
 
+static inline struct lima_device *to_lima_dev(struct drm_device *dev)
+{
+	return dev->dev_private;
+}
+
 static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct drm_lima_info *info = data;
-	struct lima_device *ldev = dev->dev_private;
+	struct lima_device *ldev = to_lima_dev(dev);
 
 	switch (ldev->gpu_type) {
 	case GPU_MALI400:
@@ -24,10 +29,17 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
 {
 	struct drm_lima_gem_create *args = data;
 
-	if (args->flags)
+	if (args->flags || args->size == 0)
 		return -EINVAL;
 
 	return lima_gem_create_handle(dev, file, args->size, args->flags, &args->handle);
+}
+
+static int lima_ioctl_gem_info(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_gem_info *args = data;
+
+	return lima_gem_mmap_offset(file, args->handle, &args->offset);
 }
 
 static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
@@ -58,7 +70,7 @@ err0:
 
 static int lima_drm_driver_unload(struct drm_device *dev)
 {
-	struct lima_device *ldev = dev->dev_private;
+	struct lima_device *ldev = to_lima_dev(dev);
 
 	lima_device_fini(ldev);
 	kfree(ldev);
@@ -69,7 +81,10 @@ static int lima_drm_driver_unload(struct drm_device *dev)
 static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_CREATE, lima_ioctl_gem_create, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
 };
+
+extern const struct vm_operations_struct lima_gem_vm_ops;
 
 static const struct file_operations lima_drm_driver_fops = {
 	.owner              = THIS_MODULE,
@@ -79,6 +94,7 @@ static const struct file_operations lima_drm_driver_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl       = drm_compat_ioctl,
 #endif
+	.mmap               = lima_gem_mmap,
 };
 
 static struct drm_driver lima_drm_driver = {
@@ -89,6 +105,7 @@ static struct drm_driver lima_drm_driver = {
 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
 	.fops               = &lima_drm_driver_fops,
 	.gem_free_object_unlocked = lima_gem_free_object,
+	.gem_vm_ops         = &lima_gem_vm_ops,
 	.name               = "lima",
 	.desc               = "lima DRM",
 	.date               = "20170325",

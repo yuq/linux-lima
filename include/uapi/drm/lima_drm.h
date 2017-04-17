@@ -42,11 +42,19 @@ struct drm_lima_gem_create {
 	__u32 pad;
 };
 
+struct drm_lima_gem_info {
+	__u32 handle;  /* in */
+	__u32 pad;
+	__u64 offset;  /* out */
+};
+
 #define DRM_LIMA_INFO        0x00
 #define DRM_LIMA_GEM_CREATE  0x01
+#define DRM_LIMA_GEM_INFO    0x02
 
 #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
 #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
+#define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
 
 #if defined(__cplusplus)
 }
