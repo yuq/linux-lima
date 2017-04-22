@@ -121,13 +121,9 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 		return err;
 	}
 
-	ldev->empty_mmu_pda = dma_alloc_wc(ldev->dev, PAGE_SIZE,
-					   &ldev->empty_mmu_pda_dma, GFP_KERNEL);
-	if (!ldev->empty_mmu_pda) {
-		err = -ENOMEM;
+	err = lima_vm_init(&ldev->empty_vm, ldev->dev, true);
+	if (err)
 		goto err_out;
-	}
-	memset(ldev->empty_mmu_pda, 0, PAGE_SIZE);
 
 	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
 	if (!ldev->pmu) {
@@ -247,10 +243,7 @@ void lima_device_fini(struct lima_device *ldev)
 		kfree(ldev->pmu);
 	}
 
-	if (ldev->empty_mmu_pda) {
-		dma_free_wc(ldev->dev, PAGE_SIZE, ldev->empty_mmu_pda,
-			    ldev->empty_mmu_pda_dma);
-	}
+	lima_vm_fini(&ldev->empty_vm);
 
 	lima_clk_fini(ldev);
 }

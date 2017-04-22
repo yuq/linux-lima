@@ -48,13 +48,25 @@ struct drm_lima_gem_info {
 	__u64 offset;  /* out */
 };
 
+#define LIMA_VA_OP_MAP    1
+#define LIMA_VA_OP_UNMAP  2
+
+struct drm_lima_gem_va {
+	__u32 handle;  /* in */
+	__u32 op;      /* in */
+	__u32 flags;   /* in */
+	__u32 va;      /* in */
+};
+
 #define DRM_LIMA_INFO        0x00
 #define DRM_LIMA_GEM_CREATE  0x01
 #define DRM_LIMA_GEM_INFO    0x02
+#define DRM_LIMA_GEM_VA      0x03
 
 #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
 #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
 #define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
+#define DRM_IOCTL_LIMA_GEM_VA DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_VA, struct drm_lima_gem_va)
 
 #if defined(__cplusplus)
 }
