@@ -3,5 +3,6 @@ config DRM_LIMA
        tristate "LIMA (DRM support for ARM Mali 400 GPU)"
        depends on DRM
        depends on ARCH_SUNXI
+       select INTERVAL_TREE
        help
          DRM driver for ARM Mali 400 GPUs.
