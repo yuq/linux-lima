@@ -42,6 +42,20 @@ static int lima_ioctl_gem_info(struct drm_device *dev, void *data, struct drm_fi
 	return lima_gem_mmap_offset(file, args->handle, &args->offset);
 }
 
+static int lima_ioctl_gem_va(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_gem_va *args = data;
+
+	switch (args->op) {
+	case LIMA_VA_OP_MAP:
+		return lima_gem_va_map(file, args->handle, args->flags, args->va);
+	case LIMA_VA_OP_UNMAP:
+		return lima_gem_va_unmap(file, args->handle, args->va);
+	default:
+		return -EINVAL;
+	}
+}
+
 static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct lima_device *ldev;
@@ -78,10 +92,40 @@ static int lima_drm_driver_unload(struct drm_device *dev)
 	return 0;
 }
 
+static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
+{
+	int err;
+	struct lima_drm_priv *priv;
+
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	err = lima_vm_init(&priv->vm, dev->dev, false);
+	if (err)
+		goto err_out0;
+
+	file->driver_priv = priv;
+	return 0;
+
+err_out0:
+	kfree(priv);
+	return err;
+}
+
+static void lima_drm_driver_preclose(struct drm_device *dev, struct drm_file *file)
+{
+	struct lima_drm_priv *priv = file->driver_priv;
+
+	lima_vm_fini(&priv->vm);
+	kfree(priv);
+}
+
 static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_INFO, lima_ioctl_info, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_CREATE, lima_ioctl_gem_create, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_GEM_VA, lima_ioctl_gem_va, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 extern const struct vm_operations_struct lima_gem_vm_ops;
@@ -101,6 +145,8 @@ static struct drm_driver lima_drm_driver = {
 	.driver_features    = DRIVER_RENDER | DRIVER_GEM,
 	.load		    = lima_drm_driver_load,
 	.unload             = lima_drm_driver_unload,
+	.open               = lima_drm_driver_open,
+	.preclose           = lima_drm_driver_preclose,
 	.ioctls             = lima_drm_driver_ioctls,
 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
 	.fops               = &lima_drm_driver_fops,
