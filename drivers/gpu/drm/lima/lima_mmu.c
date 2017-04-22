@@ -28,32 +28,6 @@
 #define   LIMA_MMU_INT_READ_BUS_ERROR       0x02
 #define LIMA_MMU_INT_STATUS		  0x0020
 
-#define LIMA_MMU_FLAG_PRESENT          (1 << 0)
-#define LIMA_MMU_FLAG_READ_PERMISSION  (1 << 1)
-#define LIMA_MMU_FLAG_WRITE_PERMISSION (1 << 2)
-#define LIMA_MMU_FLAG_OVERRIDE_CACHE   (1 << 3)
-#define LIMA_MMU_FLAG_WRITE_CACHEABLE  (1 << 4)
-#define LIMA_MMU_FLAG_WRITE_ALLOCATE   (1 << 5)
-#define LIMA_MMU_FLAG_WRITE_BUFFERABLE (1 << 6)
-#define LIMA_MMU_FLAG_READ_CACHEABLE   (1 << 7)
-#define LIMA_MMU_FLAG_READ_ALLOCATE    (1 << 8)
-#define LIMA_MMU_FLAG_MASK             0x1FF
-
-#define LIMA_MMU_FLAGS_FORCE_GP_READ_ALLOCATE (	 \
-		LIMA_MMU_FLAG_PRESENT |		 \
-		LIMA_MMU_FLAG_READ_PERMISSION |  \
-		LIMA_MMU_FLAG_WRITE_PERMISSION | \
-		LIMA_MMU_FLAG_OVERRIDE_CACHE |	 \
-		LIMA_MMU_FLAG_WRITE_CACHEABLE |  \
-		LIMA_MMU_FLAG_WRITE_BUFFERABLE | \
-		LIMA_MMU_FLAG_READ_CACHEABLE |	 \
-		LIMA_MMU_FLAG_READ_ALLOCATE )
-
-#define LIMA_MMU_FLAGS_DEFAULT (			   \
-		LIMA_MMU_FLAG_PRESENT |			   \
-		LIMA_MMU_FLAG_READ_PERMISSION |		   \
-		LIMA_MMU_FLAG_WRITE_PERMISSION )
-
 #define mmu_write(reg, data) writel(data, mmu->ip.iomem + LIMA_MMU_##reg)
 #define mmu_read(reg) readl(mmu->ip.iomem + LIMA_MMU_##reg)
 
@@ -96,7 +70,7 @@ int lima_mmu_init(struct lima_mmu *mmu)
 	}
 
 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
-	mmu_write(DTE_ADDR, dev->empty_mmu_pda_dma);
+	mmu_write(DTE_ADDR, dev->empty_vm.pd.dma);
 	mmu_write(COMMAND, LIMA_MMU_COMMAND_ENABLE_PAGING);
 	for (timeout = 1000; timeout > 0; timeout--) {
 		if (mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED)
