@@ -94,7 +94,7 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 	int err, i;
 	struct device_node *np;
 	u32 num_pp;
-	struct lima_mmu *mmu;
+	struct lima_gp *gp;
 
 	ldev->pdev = dev->platformdev;
 	ldev->dev = &dev->platformdev->dev;
@@ -150,30 +150,25 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 		goto err_out;
 	}
 
-	mmu = kzalloc(sizeof(*ldev->mmu[0]), GFP_KERNEL);
-	if (!mmu) {
+	gp = kzalloc(sizeof(*gp), GFP_KERNEL);
+	if (!gp) {
 		err = -ENOMEM;
 		goto err_out;
 	}
-	if ((err = lima_init_ip(ldev, "gp-mmu", &mmu->ip)) ||
-	    (err = lima_mmu_init(mmu))) {
-		kfree(mmu);
+	if ((err = lima_init_ip(ldev, "gp-mmu", &gp->mmu.ip)) ||
+	    (err = lima_mmu_init(&gp->mmu))) {
+		kfree(gp);
 		goto err_out;
 	}
-	ldev->mmu[ldev->num_mmu++] = mmu;
-
-	ldev->gp = kzalloc(sizeof(*ldev->gp), GFP_KERNEL);
-	if (!ldev->gp) {
-		err = -ENOMEM;
+	if ((err = lima_init_ip(ldev, "gp", &gp->ip)) ||
+	    (err = lima_gp_init(gp))) {
+		lima_mmu_fini(&gp->mmu);
+	        kfree(gp);
 		goto err_out;
 	}
-	ldev->gp->mmu = mmu;
-	if ((err = lima_init_ip(ldev, "gp", &ldev->gp->ip)) ||
-	    (err = lima_gp_init(ldev->gp))) {
-		kfree(ldev->gp);
-		ldev->gp = NULL;
-		goto err_out;
-	}
+	ldev->gp = gp;
+	lima_sched_pipe_init(&gp->pipe, gp->ip.name);
+	ldev->pipe[ldev->num_pipe++] = &gp->pipe;
 
 	for (i = 0; i < num_pp; i++) {
 		struct lima_pp *pp;
@@ -181,30 +176,25 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 
 		pp_name[2] += i; pp_mmu_name[2] += i;
 
-		mmu = kzalloc(sizeof(*mmu), GFP_KERNEL);
-		if (!mmu) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-		if ((err = lima_init_ip(ldev, pp_mmu_name, &mmu->ip)) ||
-		    (err = lima_mmu_init(mmu))) {
-			kfree(mmu);
-			goto err_out;
-		}
-		ldev->mmu[ldev->num_mmu++] = mmu;
-
 		pp = kzalloc(sizeof(*pp), GFP_KERNEL);
 		if (!pp) {
 			err = -ENOMEM;
 			goto err_out;
 		}
-		pp->mmu = mmu;
+		if ((err = lima_init_ip(ldev, pp_mmu_name, &pp->mmu.ip)) ||
+		    (err = lima_mmu_init(&pp->mmu))) {
+			kfree(pp);
+			goto err_out;
+		}
 		if ((err = lima_init_ip(ldev, pp_name, &pp->ip)) ||
 		    (err = lima_pp_init(pp))) {
+			lima_mmu_fini(&pp->mmu);
 			kfree(pp);
 			goto err_out;
 		}
 		ldev->pp[ldev->num_pp++] = pp;
+		lima_sched_pipe_init(&pp->pipe, pp->ip.name);
+		ldev->pipe[ldev->num_pipe++] = &pp->pipe;
 	}
 
 	return 0;
@@ -219,18 +209,17 @@ void lima_device_fini(struct lima_device *ldev)
 	int i;
 
 	for (i = 0; i < ldev->num_pp; i++) {
+		lima_sched_pipe_fini(&ldev->pp[i]->pipe);
 		lima_pp_fini(ldev->pp[i]);
+		lima_mmu_fini(&ldev->pp[i]->mmu);
 		kfree(ldev->pp[i]);
 	}
 
 	if (ldev->gp) {
+		lima_sched_pipe_fini(&ldev->gp->pipe);
 		lima_gp_fini(ldev->gp);
+		lima_mmu_fini(&ldev->gp->mmu);
 		kfree(ldev->gp);
-	}
-
-	for (i = 0; i < ldev->num_mmu; i++) {
-		lima_mmu_fini(ldev->mmu[i]);
-		kfree(ldev->mmu[i]);
 	}
 
 	if (ldev->l2_cache) {

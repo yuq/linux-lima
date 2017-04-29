@@ -1,9 +1,9 @@
 #include <drm/drmP.h>
 #include <drm/drm_gem.h>
 #include <linux/dma-mapping.h>
+#include <linux/reservation.h>
 
 #include "lima.h"
-
 
 struct lima_bo_va {
 	struct list_head list;
@@ -18,6 +18,8 @@ struct lima_bo {
 
 	struct mutex lock;
 	struct list_head va;
+
+	struct reservation_object resv;
 };
 
 static inline
@@ -45,6 +47,7 @@ static struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 
 
 	mutex_init(&bo->lock);
 	INIT_LIST_HEAD(&bo->va);
+	reservation_object_init(&bo->resv);
 
 	err = drm_gem_object_init(dev, &bo->gem, size);
 	if (err)
@@ -95,6 +98,7 @@ void lima_gem_free_object(struct drm_gem_object *obj)
 	}
 
 	dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
+	reservation_object_fini(&bo->resv);
 	drm_gem_object_release(obj);
 	kfree(bo);
 }
@@ -241,5 +245,155 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
 
 out:
 	drm_gem_object_unreference_unlocked(obj);
+	return err;
+}
+
+static int lima_gem_lock_bos(struct lima_bo **bos, u32 nr_bos,
+			     struct ww_acquire_ctx *ctx)
+{
+        int i, ret = 0, contended, slow_locked = -1;
+
+	ww_acquire_init(ctx, &reservation_ww_class);
+
+retry:
+	for (i = 0; i < nr_bos; i++) {
+		if (i == slow_locked) {
+			slow_locked = -1;
+			continue;
+		}
+
+		ret = ww_mutex_lock_interruptible(&bos[i]->resv.lock, ctx);
+		if (ret < 0) {
+			contended = i;
+			goto err;
+		}
+	}
+
+	ww_acquire_done(ctx);
+	return 0;
+
+err:
+	for (i--; i >= 0; i--)
+		ww_mutex_unlock(&bos[i]->resv.lock);
+
+	if (slow_locked >= 0)
+		ww_mutex_unlock(&bos[slow_locked]->resv.lock);
+
+	if (ret == -EDEADLK) {
+		/* we lost out in a seqno race, lock and retry.. */
+		ret = ww_mutex_lock_slow_interruptible(&bos[contended]->resv.lock, ctx);
+		if (!ret) {
+			slow_locked = contended;
+			goto retry;
+		}
+	}
+	ww_acquire_fini(ctx);
+
+	return ret;
+}
+
+static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
+			    struct lima_bo *bo, bool write)
+{
+	int i, err;
+	struct dma_fence *f;
+
+	if (write) {
+		struct reservation_object_list *fobj =
+			reservation_object_get_list(&bo->resv);
+
+		if (fobj && fobj->shared_count > 0) {
+			for (i = 0; i < fobj->shared_count; i++) {
+				f = rcu_dereference_protected(
+					fobj->shared[i], reservation_object_held(&bo->resv));
+				if (f->context != context) {
+					err = lima_sched_task_add_dep(task, f);
+					if (err)
+						return err;
+				}
+			}
+		}
+	}
+
+	f = reservation_object_get_excl(&bo->resv);
+	if (f) {
+		err = lima_sched_task_add_dep(task, f);
+		if (err)
+			return err;
+	}
+
+	if (!write) {
+		err = reservation_object_reserve_shared(&bo->resv);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
+		    void *frame, u32 *fence)
+{
+	struct lima_bo **lbos;
+	int i, err = 0;
+	struct ww_acquire_ctx ctx;
+	struct lima_sched_task *task;
+
+	lbos = kzalloc(sizeof(*lbos) * nr_bos, GFP_KERNEL);
+	if (!lbos)
+		return -ENOMEM;
+
+	for (i = 0; i < nr_bos; i++) {
+		struct drm_gem_object *obj;
+
+		obj = drm_gem_object_lookup(file, bos[i].handle);
+		if (!obj) {
+			err = -ENOENT;
+			goto out0;
+		}
+		lbos[i] = to_lima_bo(obj);
+	}
+
+	err = lima_gem_lock_bos(lbos, nr_bos, &ctx);
+	if (err)
+		goto out0;
+
+	task = lima_sched_task_create();
+	if (IS_ERR(task)) {
+		err = PTR_ERR(task);
+		goto out1;
+	}
+
+	for (i = 0; i < nr_bos; i++) {
+		err = lima_gem_sync_bo(task, pipe->fence_context, lbos[i],
+				       bos[i].flags & LIMA_SUBMIT_BO_WRITE);
+		if (err)
+			goto out2;
+	}
+
+	err = lima_sched_task_queue(pipe, task);
+	if (err)
+		goto out2;
+
+	for (i = 0; i < nr_bos; i++) {
+		if (bos[i].flags & LIMA_SUBMIT_BO_WRITE)
+			reservation_object_add_excl_fence(&lbos[i]->resv, task->fence);
+		else
+			reservation_object_add_shared_fence(&lbos[i]->resv, task->fence);
+	}
+	*fence = task->fence->seqno;
+
+out2:
+	if (err)
+		lima_sched_task_delete(task);
+out1:
+	for (i = 0; i < nr_bos; i++)
+		ww_mutex_unlock(&lbos[i]->resv.lock);
+	ww_acquire_fini(&ctx);
+out0:
+	for (i = 0; i < nr_bos && lbos[i]; i++)
+		drm_gem_object_unreference_unlocked(&lbos[i]->gem);
+	kfree(lbos);
 	return err;
 }
