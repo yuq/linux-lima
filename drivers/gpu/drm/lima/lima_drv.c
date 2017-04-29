@@ -1,8 +1,8 @@
 #include <linux/module.h>
 #include <linux/of_platform.h>
-#include <drm/lima_drm.h>
 
 #include "lima.h"
+
 
 static inline struct lima_device *to_lima_dev(struct drm_device *dev)
 {
@@ -54,6 +54,45 @@ static int lima_ioctl_gem_va(struct drm_device *dev, void *data, struct drm_file
 	default:
 		return -EINVAL;
 	}
+}
+
+static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_gem_submit *args = data;
+	struct drm_lima_gem_submit_bo *bos;
+	int err = 0;
+	void *frame;
+	struct lima_device *ldev = to_lima_dev(dev);
+
+	if (args->pipe >= ldev->num_pipe || args->nr_bos == 0 || args->frame_size == 0)
+		return -EINVAL;
+
+	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
+	if (!bos)
+		return -ENOMEM;
+	if (copy_from_user(bos, u64_to_user_ptr(args->bos), args->nr_bos * sizeof(*bos))) {
+		err = -EFAULT;
+		goto out0;
+	}
+
+	frame = kmalloc(args->frame_size, GFP_KERNEL);
+	if (!frame) {
+		err = -ENOMEM;
+		goto out0;
+	}
+	if (copy_from_user(frame, u64_to_user_ptr(args->frame), args->frame_size)) {
+		err = -EFAULT;
+		goto out1;
+	}
+
+	err = lima_gem_submit(file, ldev->pipe[args->pipe], bos, args->nr_bos,
+			      frame, &args->fence);
+
+out1:
+	kfree(frame);
+out0:
+	kfree(bos);
+	return err;
 }
 
 static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
@@ -126,6 +165,7 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_CREATE, lima_ioctl_gem_create, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_VA, lima_ioctl_gem_va, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_GEM_SUBMIT, lima_ioctl_gem_submit, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 extern const struct vm_operations_struct lima_gem_vm_ops;
