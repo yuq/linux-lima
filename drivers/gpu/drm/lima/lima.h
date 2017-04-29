@@ -22,7 +22,10 @@
 #ifndef __LIMA_H__
 
 #include <drm/drmP.h>
+#include <drm/lima_drm.h>
+
 #include "lima_vm.h"
+#include "lima_sched.h"
 
 enum lima_gpu_type {
 	GPU_MALI400 = 0,
@@ -53,12 +56,14 @@ struct lima_mmu {
 
 struct lima_gp {
 	struct lima_ip ip;
-	struct lima_mmu *mmu;
+	struct lima_mmu mmu;
+	struct lima_sched_pipe pipe;
 };
 
 struct lima_pp {
 	struct lima_ip ip;
-	struct lima_mmu *mmu;
+	struct lima_mmu mmu;
+	struct lima_sched_pipe pipe;
 };
 
 #define LIMA_MAX_PP 4
@@ -78,8 +83,8 @@ struct lima_device {
 
 	struct lima_l2_cache *l2_cache;
 
-	struct lima_mmu *mmu[LIMA_MAX_PP + 1];
-	int num_mmu;
+	struct lima_sched_pipe *pipe[LIMA_MAX_PP + 1];
+	int num_pipe;
 
 	struct lima_gp *gp;
 
@@ -118,5 +123,8 @@ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
 int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
+int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
+		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
+		    void *frame, u32 *fence);
 
 #endif

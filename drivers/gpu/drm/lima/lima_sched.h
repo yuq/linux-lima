@@ -1,0 +1,55 @@
+/*
+ * Copyright (C) 2017 Lima Project
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+#ifndef __LIMA_SCHED_H__
+#define __LIMA_SCHED_H__
+
+#include <linux/list.h>
+
+struct lima_sched_task {
+	struct list_head list;
+
+	struct dma_fence **dep;
+	int num_dep;
+	int max_dep;
+
+	struct dma_fence *fence;
+};
+
+struct lima_sched_pipe {
+	const char *name;
+	struct mutex lock;
+	struct list_head queue;
+
+	u64 fence_context;
+	spinlock_t fence_lock;
+	u32 fence_seqno;
+};
+
+struct lima_sched_task *lima_sched_task_create(void);
+void lima_sched_task_delete(struct lima_sched_task *task);
+int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
+int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
+
+void lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
+void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
+
+#endif
