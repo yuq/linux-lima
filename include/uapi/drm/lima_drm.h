@@ -75,17 +75,25 @@ struct drm_lima_gem_submit {
 	__u64 frame_size;  /* in */
 };
 
+struct drm_lima_wait_fence {
+	__u32 pipe;        /* in */
+	__u32 fence;       /* in */
+	__u64 timeout_ns;  /* in */
+};
+
 #define DRM_LIMA_INFO        0x00
 #define DRM_LIMA_GEM_CREATE  0x01
 #define DRM_LIMA_GEM_INFO    0x02
 #define DRM_LIMA_GEM_VA      0x03
 #define DRM_LIMA_GEM_SUBMIT  0x04
+#define DRM_LIMA_WAIT_FENCE  0x05
 
 #define DRM_IOCTL_LIMA_INFO DRM_IOR(DRM_COMMAND_BASE + DRM_LIMA_INFO, struct drm_lima_info)
 #define DRM_IOCTL_LIMA_GEM_CREATE DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_CREATE, struct drm_lima_gem_create)
 #define DRM_IOCTL_LIMA_GEM_INFO DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_INFO, struct drm_lima_gem_info)
 #define DRM_IOCTL_LIMA_GEM_VA DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_GEM_VA, struct drm_lima_gem_va)
 #define DRM_IOCTL_LIMA_GEM_SUBMIT DRM_IOWR(DRM_COMMAND_BASE + DRM_LIMA_GEM_SUBMIT, struct drm_lima_gem_submit)
+#define DRM_IOCTL_LIMA_WAIT_FENCE DRM_IOW(DRM_COMMAND_BASE + DRM_LIMA_WAIT_FENCE, struct drm_lima_wait_fence)
 
 #if defined(__cplusplus)
 }
