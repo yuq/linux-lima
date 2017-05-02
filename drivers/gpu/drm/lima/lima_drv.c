@@ -95,6 +95,17 @@ out0:
 	return err;
 }
 
+static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_wait_fence *args = data;
+	struct lima_device *ldev = to_lima_dev(dev);
+
+	if (args->pipe >= ldev->num_pipe)
+		return -EINVAL;
+
+	return lima_sched_pipe_wait_fence(ldev->pipe[args->pipe], args->fence, args->timeout_ns);
+}
+
 static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct lima_device *ldev;
@@ -166,6 +177,7 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_INFO, lima_ioctl_gem_info, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_VA, lima_ioctl_gem_va, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_SUBMIT, lima_ioctl_gem_submit, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_WAIT_FENCE, lima_ioctl_wait_fence, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 extern const struct vm_operations_struct lima_gem_vm_ops;
