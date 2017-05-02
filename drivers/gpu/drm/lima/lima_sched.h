@@ -23,6 +23,7 @@
 #define __LIMA_SCHED_H__
 
 #include <linux/list.h>
+#include <linux/wait.h>
 
 struct lima_sched_task {
 	struct list_head list;
@@ -36,12 +37,21 @@ struct lima_sched_task {
 
 struct lima_sched_pipe {
 	const char *name;
-	struct mutex lock;
-	struct list_head queue;
 
 	u64 fence_context;
 	spinlock_t fence_lock;
+
+	struct task_struct *worker;
+	wait_queue_head_t worker_wait;
+
+	spinlock_t lock;
+	struct list_head queue;
 	u32 fence_seqno;
+
+	u32 fence_done_seqno;
+
+	int (*start_task)(void *data, struct lima_sched_task *task);
+	void *data;
 };
 
 struct lima_sched_task *lima_sched_task_create(void);
@@ -49,7 +59,8 @@ void lima_sched_task_delete(struct lima_sched_task *task);
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
 int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
 
-void lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
+int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
+int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns);
 
 #endif

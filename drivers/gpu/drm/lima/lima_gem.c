@@ -382,6 +382,8 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 		else
 			reservation_object_add_shared_fence(&lbos[i]->resv, task->fence);
 	}
+	dma_fence_put(task->fence);
+
 	*fence = task->fence->seqno;
 
 out2:
