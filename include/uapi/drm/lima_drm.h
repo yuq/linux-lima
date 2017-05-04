@@ -66,6 +66,19 @@ struct drm_lima_gem_submit_bo {
 	__u32 flags;   /* in */
 };
 
+struct drm_lima_m400_gp_frame {
+	__u32 vs_cmd_start;
+	__u32 vs_cmd_end;
+	__u32 plbu_cmd_start;
+	__u32 plbu_cmd_end;
+	__u32 tile_heap_start;
+	__u32 tile_heap_end;
+};
+
+struct drm_lima_m400_pp_frame {
+	__u32 dummy;
+};
+
 struct drm_lima_gem_submit {
 	__u32 fence;       /* out */
 	__u32 pipe;        /* in */
