@@ -27,6 +27,8 @@
 
 struct lima_sched_task {
 	struct list_head list;
+	struct lima_vm *vm;
+	void *frame;
 
 	struct dma_fence **dep;
 	int num_dep;
@@ -40,6 +42,7 @@ struct lima_sched_pipe {
 
 	u64 fence_context;
 	spinlock_t fence_lock;
+	struct lima_mmu *mmu;
 
 	struct task_struct *worker;
 	wait_queue_head_t worker_wait;
@@ -54,7 +57,7 @@ struct lima_sched_pipe {
 	void *data;
 };
 
-struct lima_sched_task *lima_sched_task_create(void);
+struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame);
 void lima_sched_task_delete(struct lima_sched_task *task);
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
 int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
