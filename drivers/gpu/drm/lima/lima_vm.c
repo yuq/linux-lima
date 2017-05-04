@@ -76,9 +76,9 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
 				goto err_out1;
 			}
 			memset(vm->pts[pde].cpu, 0, LIMA_PAGE_SIZE);
+			vm->pd.cpu[pde] = vm->pts[pde].dma | LIMA_VM_FLAG_PRESENT;
 		}
 
-		vm->pd.cpu[pde] = vm->pts[pde].dma | LIMA_VM_FLAG_PRESENT;
 		vm->pts[pde].cpu[pte] = dma | LIMA_VM_FLAGS_CACHE;
 	}
 
@@ -177,4 +177,24 @@ void lima_vm_fini(struct lima_vm *vm)
 
 	if (vm->pd.cpu)
 		dma_free_coherent(vm->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+}
+
+void lima_vm_print(struct lima_vm *vm)
+{
+	int i, j;
+
+	if (!vm->pd.cpu)
+		return;
+
+	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
+		if (vm->pd.cpu[i]) {
+			printk(KERN_INFO "lima vm pd %03x:%08x\n", i, vm->pd.cpu[i]);
+			if ((vm->pd.cpu[i] & ~LIMA_VM_FLAG_MASK) != vm->pts[i].dma)
+				printk(KERN_INFO "pd %x not match pt %x\n", i, vm->pts[i].dma);
+			for (j = 0; j < LIMA_PAGE_ENT_NUM; j++) {
+				if (vm->pts[i].cpu[j])
+					printk(KERN_INFO "  pt %03x:%08x\n", j, vm->pts[i].cpu[j]);
+			}
+		}
+	}
 }

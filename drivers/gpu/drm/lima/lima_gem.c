@@ -339,6 +339,7 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 	int i, err = 0;
 	struct ww_acquire_ctx ctx;
 	struct lima_sched_task *task;
+	struct lima_drm_priv *priv = to_lima_drm_priv(file);
 
 	lbos = kzalloc(sizeof(*lbos) * nr_bos, GFP_KERNEL);
 	if (!lbos)
@@ -359,7 +360,7 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 	if (err)
 		goto out0;
 
-	task = lima_sched_task_create();
+	task = lima_sched_task_create(&priv->vm, frame);
 	if (IS_ERR(task)) {
 		err = PTR_ERR(task);
 		goto out1;
