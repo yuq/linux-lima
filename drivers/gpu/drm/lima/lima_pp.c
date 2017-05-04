@@ -13,6 +13,7 @@ int lima_pp_init(struct lima_pp *pp)
 {
 	pp->pipe.start_task = lima_pp_start_task;
 	pp->pipe.data = pp;
+	pp->pipe.mmu = &pp->mmu;
 	return 0;
 }
 

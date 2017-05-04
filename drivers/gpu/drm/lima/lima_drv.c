@@ -64,8 +64,23 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	void *frame;
 	struct lima_device *ldev = to_lima_dev(dev);
 
-	if (args->pipe >= ldev->num_pipe || args->nr_bos == 0 || args->frame_size == 0)
+	if (args->pipe >= ldev->num_pipe || args->nr_bos == 0)
 		return -EINVAL;
+
+	switch (ldev->gpu_type) {
+	case GPU_MALI400:
+		if (args->pipe == 0) {
+			if (args->frame_size != sizeof(struct drm_lima_m400_gp_frame))
+				return -EINVAL;
+		}
+		else {
+			if (args->frame_size != sizeof(struct drm_lima_m400_pp_frame))
+				return -EINVAL;
+		}
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
 	if (!bos)
@@ -89,7 +104,8 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 			      frame, &args->fence);
 
 out1:
-	kfree(frame);
+	if (err)
+		kfree(frame);
 out0:
 	kfree(bos);
 	return err;
