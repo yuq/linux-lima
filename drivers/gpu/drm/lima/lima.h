@@ -52,6 +52,7 @@ struct lima_l2_cache {
 
 struct lima_mmu {
 	struct lima_ip ip;
+	struct lima_vm *vm;
 };
 
 struct lima_gp {
@@ -109,6 +110,7 @@ void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
 
 int lima_mmu_init(struct lima_mmu *mmu);
 void lima_mmu_fini(struct lima_mmu *mmu);
+void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm);
 
 int lima_gp_init(struct lima_gp *gp);
 void lima_gp_fini(struct lima_gp *gp);

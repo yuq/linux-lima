@@ -10,7 +10,7 @@
 #define   LIMA_MMU_STATUS_IDLE                (1 << 3)
 #define   LIMA_MMU_STATUS_REPLAY_BUFFER_EMPTY (1 << 4)
 #define   LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE (1 << 5)
-#define   LIMA_MMU_STATUS_STALL_NOT_ACTIVE    (1 << 31)
+#define   LIMA_MMU_STATUS_BUS_ID(x)           ((x >> 6) & 0x1F)
 #define LIMA_MMU_COMMAND		  0x0008
 #define   LIMA_MMU_COMMAND_ENABLE_PAGING    0x00
 #define   LIMA_MMU_COMMAND_DISABLE_PAGING   0x01
@@ -31,20 +31,48 @@
 #define mmu_write(reg, data) writel(data, mmu->ip.iomem + LIMA_MMU_##reg)
 #define mmu_read(reg) readl(mmu->ip.iomem + LIMA_MMU_##reg)
 
+#define lima_mmu_send_command(command, condition)	     \
+({							     \
+	int __timeout, __ret = 0;			     \
+							     \
+	mmu_write(COMMAND, command);			     \
+	for (__timeout = 1000; __timeout > 0; __timeout--) { \
+		if (condition)				     \
+			break;				     \
+	}						     \
+	if (!__timeout)	{				     \
+		dev_err(dev->dev, "mmu command %x timeout\n", command); \
+		__ret = -ETIMEDOUT;			     \
+	}						     \
+	__ret;						     \
+})
 
 static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 {
 	struct lima_mmu *mmu = data;
 	struct lima_device *dev = mmu->ip.dev;
+	u32 status = mmu_read(INT_STATUS);
 
-	dev_info(dev->dev, "mmu %s irq\n", mmu->ip.name);
+	if (status & LIMA_MMU_INT_PAGE_FAULT) {
+		u32 fault = mmu_read(PAGE_FAULT_ADDR);
+		dev_info(dev->dev, "mmu page fault at 0x%x from bus id %d of type %s on %s\n",
+			 fault, LIMA_MMU_STATUS_BUS_ID(status),
+			 status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
+			 mmu->ip.name);
+	}
+
+	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
+		dev_info(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
+	}
+
+	mmu_write(INT_CLEAR, LIMA_MMU_INT_PAGE_FAULT|LIMA_MMU_INT_READ_BUS_ERROR);
 	return IRQ_NONE;
 }
 
 int lima_mmu_init(struct lima_mmu *mmu)
 {
 	struct lima_device *dev = mmu->ip.dev;
-	int err, timeout;
+	int err;
 
 	mmu_write(DTE_ADDR, 0xCAFEBABE);
 	if (mmu_read(DTE_ADDR) != 0xCAFEB000) {
@@ -52,15 +80,9 @@ int lima_mmu_init(struct lima_mmu *mmu)
 		return -EIO;
 	}
 
-	mmu_write(COMMAND, LIMA_MMU_COMMAND_HARD_RESET);
-	for (timeout = 1000; timeout > 0; timeout--) {
-		if (mmu_read(DTE_ADDR) == 0)
-			break;
-	}
-	if (!timeout) {
-		dev_err(dev->dev, "mmu %s reset timeout\n", mmu->ip.name);
-		return -ETIMEDOUT;
-	}
+	err = lima_mmu_send_command(LIMA_MMU_COMMAND_HARD_RESET, mmu_read(DTE_ADDR) == 0);
+	if (err)
+		return err;
 
 	err = devm_request_irq(dev->dev, mmu->ip.irq, lima_mmu_irq_handler, 0,
 			       mmu->ip.name, mmu);
@@ -71,15 +93,12 @@ int lima_mmu_init(struct lima_mmu *mmu)
 
 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
 	mmu_write(DTE_ADDR, dev->empty_vm.pd.dma);
-	mmu_write(COMMAND, LIMA_MMU_COMMAND_ENABLE_PAGING);
-	for (timeout = 1000; timeout > 0; timeout--) {
-		if (mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED)
-			break;
-	}
-	if (!timeout) {
-		dev_err(dev->dev, "mmu %s enable paging time out\n", mmu->ip.name);
-		return -ETIMEDOUT;
-	}
+	err = lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
+				    mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
+	if (err)
+		return err;
+
+	mmu->vm = &dev->empty_vm;
 
 	return 0;
 }
@@ -87,4 +106,21 @@ int lima_mmu_init(struct lima_mmu *mmu)
 void lima_mmu_fini(struct lima_mmu *mmu)
 {
 
+}
+
+void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm)
+{
+	struct lima_device *dev = mmu->ip.dev;
+
+	if (mmu->vm == vm)
+		return;
+
+	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
+			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
+	mmu_write(DTE_ADDR, vm->pd.dma);
+	/* flush the TLB */
+	mmu_write(COMMAND, LIMA_MMU_COMMAND_ZAP_CACHE);
+	lima_mmu_send_command(LIMA_MMU_COMMAND_DISABLE_STALL,
+			      !(mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE));
+	mmu->vm = vm;
 }

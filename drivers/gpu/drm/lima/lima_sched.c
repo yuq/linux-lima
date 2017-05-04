@@ -44,13 +44,16 @@ static const struct dma_fence_ops lima_fence_ops = {
 	.release = lima_fence_release,
 };
 
-struct lima_sched_task *lima_sched_task_create(void)
+struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame)
 {
 	struct lima_sched_task *task;
 
 	task = kzalloc(sizeof(*task), GFP_KERNEL);
 	if (!task)
 		return ERR_PTR(-ENOMEM);
+
+	task->vm = vm;
+	task->frame = frame;
 
 	return task;
 }
@@ -67,6 +70,9 @@ void lima_sched_task_delete(struct lima_sched_task *task)
 
 	if (task->dep)
 		kfree(task->dep);
+
+	if (task->frame)
+		kfree(task->frame);
 
 	kfree(task);
 }
@@ -163,6 +169,8 @@ static int lima_sched_pipe_worker(void *param)
 					return 0;
 			}
 		}
+
+		lima_mmu_switch_vm(pipe->mmu, task->vm);
 
 		if (!pipe->start_task(pipe->data, task)) {
 			while (dma_fence_wait(task->fence, true) == -ERESTARTSYS) {
