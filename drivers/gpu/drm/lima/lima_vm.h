@@ -24,7 +24,12 @@
 
 #include <linux/mutex.h>
 #include <linux/rbtree.h>
+#include <linux/kref.h>
 
+#define LIMA_PAGE_SIZE    4096
+#define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
+
+struct lima_device;
 
 struct lima_vm_page {
 	u32 *cpu;
@@ -33,18 +38,30 @@ struct lima_vm_page {
 
 struct lima_vm {
 	struct mutex lock;
+	struct kref refcount;
 
-	struct device *dev;
+	struct lima_device *dev;
 
 	/* tree of virtual addresses mapped */
 	struct rb_root va;
 
         struct lima_vm_page pd;
-	struct lima_vm_page *pts;
+	struct lima_vm_page pts[LIMA_PAGE_ENT_NUM];
 };
 
-int lima_vm_init(struct lima_vm *vm, struct device *dev, bool empty);
-void lima_vm_fini(struct lima_vm *vm);
+struct lima_vm *lima_vm_create(struct lima_device *dev);
+void lima_vm_release(struct kref *kref);
+
+static inline struct lima_vm *lima_vm_get(struct lima_vm *vm)
+{
+	kref_get(&vm->refcount);
+	return vm;
+}
+
+static inline void lima_vm_put(struct lima_vm *vm)
+{
+	kref_put(&vm->refcount, lima_vm_release);
+}
 
 int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size);
 int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size);

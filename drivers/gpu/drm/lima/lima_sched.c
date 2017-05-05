@@ -52,7 +52,7 @@ struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame)
 	if (!task)
 		return ERR_PTR(-ENOMEM);
 
-	task->vm = vm;
+	task->vm = lima_vm_get(vm);
 	task->frame = frame;
 
 	return task;
@@ -73,6 +73,9 @@ void lima_sched_task_delete(struct lima_sched_task *task)
 
 	if (task->frame)
 		kfree(task->frame);
+
+	if (task->vm)
+		lima_vm_put(task->vm);
 
 	kfree(task);
 }
@@ -170,7 +173,7 @@ static int lima_sched_pipe_worker(void *param)
 			}
 		}
 
-		lima_mmu_switch_vm(pipe->mmu, task->vm);
+		lima_mmu_switch_vm(pipe->mmu, task->vm, false);
 
 		if (!pipe->start_task(pipe->data, task)) {
 			while (dma_fence_wait(task->fence, true) == -ERESTARTSYS) {

@@ -179,7 +179,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 		goto err_out0;
 	}
 
-	err = lima_vm_map(&priv->vm, bo->dma_addr, va, obj->size);
+	err = lima_vm_map(priv->vm, bo->dma_addr, va, obj->size);
 	if (err)
 		goto err_out0;
 
@@ -189,7 +189,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 		goto err_out1;
 	}
 	INIT_LIST_HEAD(&bo_va->list);
-	bo_va->vm = &priv->vm;
+	bo_va->vm = priv->vm;
 	bo_va->va = va;
 
 	mutex_lock(&bo->lock);
@@ -202,7 +202,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 	return 0;
 
 err_out1:
-	lima_vm_unmap(&priv->vm, va, obj->size);
+	lima_vm_unmap(priv->vm, va, obj->size);
 err_out0:
 	drm_gem_object_unreference_unlocked(obj);
 	return err;
@@ -226,7 +226,7 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
 	mutex_lock(&bo->lock);
 
 	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
-		if (bo_va->vm == &priv->vm && bo_va->va == va) {
+		if (bo_va->vm == priv->vm && bo_va->va == va) {
 			list_del(&bo_va->list);
 			kfree(bo_va);
 			found = true;
@@ -241,7 +241,7 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
 		goto out;
 	}
 
-	err = lima_vm_unmap(&priv->vm, va, obj->size);
+	err = lima_vm_unmap(priv->vm, va, obj->size);
 
 out:
 	drm_gem_object_unreference_unlocked(obj);
@@ -360,7 +360,7 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 	if (err)
 		goto out0;
 
-	task = lima_sched_task_create(&priv->vm, frame);
+	task = lima_sched_task_create(priv->vm, frame);
 	if (IS_ERR(task)) {
 		err = PTR_ERR(task);
 		goto out1;
