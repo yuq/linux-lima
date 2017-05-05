@@ -55,6 +55,7 @@ struct lima_mmu {
 
 	spinlock_t lock;
 	struct lima_vm *vm;
+	bool zap_all;
 };
 
 struct lima_gp {
@@ -113,6 +114,7 @@ void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
 int lima_mmu_init(struct lima_mmu *mmu);
 void lima_mmu_fini(struct lima_mmu *mmu);
 void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset);
+void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size);
 
 int lima_gp_init(struct lima_gp *gp);
 void lima_gp_fini(struct lima_gp *gp);
