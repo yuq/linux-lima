@@ -97,25 +97,26 @@ err_out0:
 
 int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
 {
-	int err = 0;
+	int err, i;
 	struct interval_tree_node *it;
 	u32 addr;
+	struct lima_device *dev = vm->dev;
 
 	mutex_lock(&vm->lock);
 
 	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
 	if (it) {
 		if (it->start != va || it->last != va + size - 1) {
-			dev_err(vm->dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
+			dev_err(dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
 				va, va + size -1, it->start, it->last);
 			err = -EINVAL;
-			goto out;
+			goto err_out;
 		}
 		interval_tree_remove(it, &vm->va);
 		kfree(it);
 	}
 	else
-		goto out;
+		goto err_out;
 
 	for (addr = va; addr < va + size; addr += LIMA_PAGE_SIZE) {
 		u32 pde = LIMA_PDE(addr);
@@ -123,7 +124,14 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
 		vm->pts[pde].cpu[pte] = 0;
 	}
 
-out:
+	mutex_unlock(&vm->lock);
+
+	for (i = 0; i < dev->num_pipe; i++)
+		lima_mmu_zap_vm(dev->pipe[i]->mmu, vm, va, size);
+
+	return 0;
+
+err_out:
 	mutex_unlock(&vm->lock);
 	return err;
 }
