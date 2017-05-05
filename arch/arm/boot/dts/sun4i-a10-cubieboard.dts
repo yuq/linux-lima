@@ -59,6 +59,17 @@
 		stdout-path = "serial0:115200n8";
 	};
 
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
 	leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
@@ -79,6 +90,10 @@
 
 &ahci {
 	target-supply = <&reg_ahci_5v>;
+	status = "okay";
+};
+
+&be0 {
 	status = "okay";
 };
 
@@ -107,6 +122,16 @@
 
 &emac_sram {
 	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
 };
 
 &i2c0 {
@@ -223,6 +248,10 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_pins_a>,
 		    <&spi0_cs0_pins_a>;
+	status = "okay";
+};
+
+&tcon0 {
 	status = "okay";
 };
 
