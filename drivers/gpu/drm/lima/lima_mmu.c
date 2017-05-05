@@ -92,13 +92,14 @@ int lima_mmu_init(struct lima_mmu *mmu)
 	}
 
 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
-	mmu_write(DTE_ADDR, dev->empty_vm.pd.dma);
+	mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
 	err = lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
 				    mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
 	if (err)
 		return err;
 
-	mmu->vm = &dev->empty_vm;
+	mmu->vm = dev->empty_vm;
+	spin_lock_init(&mmu->lock);
 
 	return 0;
 }
@@ -108,12 +109,18 @@ void lima_mmu_fini(struct lima_mmu *mmu)
 
 }
 
-void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm)
+void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
 {
 	struct lima_device *dev = mmu->ip.dev;
 
-	if (mmu->vm == vm)
-		return;
+	spin_lock(&mmu->lock);
+
+	if (mmu->vm == vm) {
+		if (reset)
+			vm = dev->empty_vm;
+		else
+			goto out;
+	}
 
 	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
 			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
@@ -123,4 +130,7 @@ void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm)
 	lima_mmu_send_command(LIMA_MMU_COMMAND_DISABLE_STALL,
 			      !(mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE));
 	mmu->vm = vm;
+
+out:
+	spin_unlock(&mmu->lock);
 }

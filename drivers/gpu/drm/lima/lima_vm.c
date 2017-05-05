@@ -1,11 +1,8 @@
-#include <drm/drmP.h>
+#include <linux/slab.h>
 #include <linux/interval_tree.h>
 #include <linux/dma-mapping.h>
 
-#include "lima_vm.h"
-
-#define LIMA_PAGE_SIZE    4096
-#define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
+#include "lima.h"
 
 #define LIMA_PDE(va) (va >> 22)
 #define LIMA_PTE(va) ((va << 10) >> 22)
@@ -47,7 +44,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
 
 	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
 	if (it) {
-		dev_err(vm->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
+		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
 			va, va + size -1, it->start, it->last);
 		err = -EINVAL;
 		goto err_out0;
@@ -69,7 +66,7 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
 
 		if (!vm->pts[pde].cpu) {
 			vm->pts[pde].cpu = dma_alloc_coherent(
-				vm->dev, LIMA_PAGE_SIZE,
+				vm->dev->dev, LIMA_PAGE_SIZE,
 				&vm->pts[pde].dma, GFP_KERNEL);
 			if (!vm->pts[pde].cpu) {
 				err = -ENOMEM;
@@ -109,7 +106,7 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
 	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
 	if (it) {
 		if (it->start != va || it->last != va + size - 1) {
-			dev_err(vm->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
+			dev_err(vm->dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
 				va, va + size -1, it->start, it->last);
 			err = -EINVAL;
 			goto out;
@@ -131,40 +128,46 @@ out:
 	return err;
 }
 
-int lima_vm_init(struct lima_vm *vm, struct device *dev, bool empty)
+struct lima_vm *lima_vm_create(struct lima_device *dev)
 {
-	int err;
+	struct lima_vm *vm;
+
+	vm = drm_calloc_large(1, sizeof(*vm));
+	if (!vm)
+		return NULL;
 
 	vm->dev = dev;
 	vm->va = RB_ROOT;
 	mutex_init(&vm->lock);
+	kref_init(&vm->refcount);
 
-	vm->pd.cpu = dma_alloc_coherent(dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
+	vm->pd.cpu = dma_alloc_coherent(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
 	if (!vm->pd.cpu)
-		return -ENOMEM;
+		goto err_out;
 	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
 
-	if (!empty) {
-		vm->pts = drm_calloc_large(LIMA_PAGE_ENT_NUM, sizeof(vm->pts[0]));
-		if (!vm->pts) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-	}
-
-	return 0;
+	return vm;
 
 err_out:
-	dma_free_coherent(dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
-	return err;
+	drm_free_large(vm);
+	return NULL;
 }
 
-void lima_vm_fini(struct lima_vm *vm)
+void lima_vm_release(struct kref *kref)
 {
+	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
 	struct interval_tree_node *it, *tmp;
+	struct lima_device *dev = vm->dev;
+	int i;
+
+	/* switch mmu vm to empty vm if this vm is used by it */
+	if (vm != dev->empty_vm) {
+		for (i = 0; i < dev->num_pipe; i++)
+			lima_mmu_switch_vm(dev->pipe[i]->mmu, vm, true);
+	}
 
 	if (!RB_EMPTY_ROOT(&vm->va)) {
-		dev_err(vm->dev, "still active bo inside vm\n");
+		dev_err(vm->dev->dev, "still active bo inside vm\n");
 	}
 
 	rbtree_postorder_for_each_entry_safe(it, tmp, &vm->va, rb) {
@@ -172,11 +175,10 @@ void lima_vm_fini(struct lima_vm *vm)
 		kfree(it);
 	}
 
-	if (vm->pts)
-		drm_free_large(vm->pts);
-
 	if (vm->pd.cpu)
-		dma_free_coherent(vm->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+
+	drm_free_large(vm);
 }
 
 void lima_vm_print(struct lima_vm *vm)

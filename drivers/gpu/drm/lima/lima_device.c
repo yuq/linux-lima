@@ -189,9 +189,11 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 		return err;
 	}
 
-	err = lima_vm_init(&ldev->empty_vm, ldev->dev, true);
-	if (err)
+	ldev->empty_vm = lima_vm_create(ldev);
+	if (!ldev->empty_vm) {
+		err = -ENOMEM;
 		goto err_out;
+	}
 
 	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
 	if (!ldev->pmu) {
@@ -261,7 +263,7 @@ void lima_device_fini(struct lima_device *ldev)
 		kfree(ldev->pmu);
 	}
 
-	lima_vm_fini(&ldev->empty_vm);
+	lima_vm_put(ldev->empty_vm);
 
 	lima_clk_fini(ldev);
 }
