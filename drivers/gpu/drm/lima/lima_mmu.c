@@ -100,6 +100,7 @@ int lima_mmu_init(struct lima_mmu *mmu)
 
 	mmu->vm = dev->empty_vm;
 	spin_lock_init(&mmu->lock);
+	mmu->zap_all = false;
 
 	return 0;
 }
@@ -118,19 +119,40 @@ void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
 	if (mmu->vm == vm) {
 		if (reset)
 			vm = dev->empty_vm;
-		else
+		else if (!mmu->zap_all)
 			goto out;
 	}
 
 	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
 			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
-	mmu_write(DTE_ADDR, vm->pd.dma);
+
+	if (mmu->vm != vm)
+		mmu_write(DTE_ADDR, vm->pd.dma);
+
 	/* flush the TLB */
 	mmu_write(COMMAND, LIMA_MMU_COMMAND_ZAP_CACHE);
+
 	lima_mmu_send_command(LIMA_MMU_COMMAND_DISABLE_STALL,
 			      !(mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE));
+
 	mmu->vm = vm;
+	mmu->zap_all = false;
 
 out:
+	spin_unlock(&mmu->lock);
+}
+
+void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size)
+{
+	/* TODO: use LIMA_MMU_ZAP_ONE_LINE to just zap a PDE
+         * needs to investigate:
+         * 1. if LIMA_MMU_ZAP_ONE_LINE need stall mmu, otherwise we can zap it here
+         * 2. how many PDE when LIMA_MMU_ZAP_ONE_LINE is better than zap all,
+         *    otherwise we can use zap all when exceeds that limit
+         */
+
+	spin_lock(&mmu->lock);
+	if (mmu->vm == vm)
+	        mmu->zap_all = true;
 	spin_unlock(&mmu->lock);
 }
