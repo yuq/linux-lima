@@ -162,14 +162,17 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 {
 	int err;
 	struct lima_drm_priv *priv;
+	struct lima_device *ldev = to_lima_dev(dev);
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	err = lima_vm_init(&priv->vm, dev->dev, false);
-	if (err)
+	priv->vm = lima_vm_create(ldev);
+	if (!priv->vm) {
+		err = -ENOMEM;
 		goto err_out0;
+	}
 
 	file->driver_priv = priv;
 	return 0;
@@ -183,7 +186,7 @@ static void lima_drm_driver_preclose(struct drm_device *dev, struct drm_file *fi
 {
 	struct lima_drm_priv *priv = file->driver_priv;
 
-	lima_vm_fini(&priv->vm);
+	lima_vm_put(priv->vm);
 	kfree(priv);
 }
 
