@@ -148,13 +148,43 @@ static struct lima_sched_task *lima_sched_pipe_get_task(struct lima_sched_pipe *
 	return task;
 }
 
+#define LIMA_WORKER_WAIT_TIMEOUT_NS 1000000000
+
+static int lima_sched_pipe_worker_wait_fence(struct dma_fence *fence)
+{
+	int ret;
+	unsigned long timeout = nsecs_to_jiffies(LIMA_WORKER_WAIT_TIMEOUT_NS);
+
+	while (1) {
+		ret = dma_fence_wait_timeout(fence, true, timeout);
+
+		/* interrupted by signal, may be kthread stop */
+		if (ret == -ERESTARTSYS) {
+			if (kthread_should_stop())
+				return ret;
+			else
+				continue;
+		}
+
+		if (ret < 0)
+			return ret;
+
+		if (!ret)
+			return -ETIMEDOUT;
+
+		return 0;
+	}
+
+	return 0;
+}
+
 static int lima_sched_pipe_worker(void *param)
 {
 	struct lima_sched_pipe *pipe = param;
 	struct lima_sched_task *task;
 
 	while (!kthread_should_stop()) {
-		int i;
+		int i, ret;
 		unsigned long saved_flags;
 
 		wait_event_interruptible(pipe->worker_wait,
@@ -166,22 +196,28 @@ static int lima_sched_pipe_worker(void *param)
 
 		/* wait all dependent fence be signaled */
 		for (i = 0; i < task->num_dep; i++) {
-			/* interrupted by signal, may be kthread stop, ignore other error */
-			while (dma_fence_wait(task->dep[i], true) == -ERESTARTSYS) {
-				if (kthread_should_stop())
-					return 0;
+			ret = lima_sched_pipe_worker_wait_fence(task->dep[i]);
+			if (ret == -ERESTARTSYS)
+				return 0;
+			if (ret < 0) {
+				DRM_INFO("lima worker wait dep fence error %d\n", ret);
+				goto abort;
 			}
 		}
 
 		lima_mmu_switch_vm(pipe->mmu, task->vm, false);
 
 		if (!pipe->start_task(pipe->data, task)) {
-			while (dma_fence_wait(task->fence, true) == -ERESTARTSYS) {
-				if (kthread_should_stop())
-					return 0;
+			ret = lima_sched_pipe_worker_wait_fence(task->fence);
+			if (ret == -ERESTARTSYS)
+				return 0;
+			if (ret < 0) {
+				DRM_INFO("lima worker wait task fence error %d\n", ret);
+				pipe->reset(pipe->data);
 			}
 		}
 
+	abort:
 		spin_lock_irqsave(&pipe->lock, saved_flags);
 		list_del(&task->list);
 		spin_unlock_irqrestore(&pipe->lock, saved_flags);
@@ -293,4 +329,15 @@ int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 time
 	}
 
 	return ret;
+}
+
+void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe)
+{
+	struct lima_sched_task *task;
+
+	spin_lock(&pipe->lock);
+	task = list_first_entry(&pipe->queue, struct lima_sched_task, list);
+	spin_unlock(&pipe->lock);
+
+	dma_fence_signal(task->fence);
 }
