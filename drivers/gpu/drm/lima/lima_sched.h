@@ -54,6 +54,7 @@ struct lima_sched_pipe {
 	u32 fence_done_seqno;
 
 	int (*start_task)(void *data, struct lima_sched_task *task);
+	int (*reset)(void *data);
 	void *data;
 };
 
@@ -65,5 +66,6 @@ int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
 int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns);
+void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe);
 
 #endif

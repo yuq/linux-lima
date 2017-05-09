@@ -102,8 +102,23 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	struct lima_device *dev = gp->ip.dev;
 	u32 state = gp_read(INT_STAT);
 	u32 status = gp_read(STATUS);
+	bool task_done = false;
 
 	dev_info_ratelimited(dev->dev, "gp irq state=%x status=%x\n", state, status);
+
+	if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
+		gp->task &= ~LIMA_GP_TASK_VS;
+		task_done = true;
+	}
+
+	if (state & LIMA_GP_IRQ_PLBU_END_CMD_LST) {
+		gp->task &= ~LIMA_GP_TASK_PLBU;
+		task_done = true;
+	}
+
+	if (task_done && !gp->task)
+		lima_sched_pipe_task_done(&gp->pipe);
+
 	gp_write(INT_CLEAR, state);
 	return IRQ_NONE;
 }
@@ -114,17 +129,22 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 	struct drm_lima_m400_gp_frame *frame = task->frame;
 	u32 cmd = 0;
 
-	DRM_INFO("lima start task gp %s\n", gp->ip.name);
+	DRM_INFO("lima start task gp status %08x\n", gp_read(STATUS));
 
 	if (frame->vs_cmd_start > frame->vs_cmd_end ||
 	    frame->plbu_cmd_start > frame->plbu_cmd_end ||
 	    frame->tile_heap_start > frame->tile_heap_end)
 		return -EINVAL;
 
-	if (frame->vs_cmd_start != frame->vs_cmd_end)
+	gp->task = 0;
+	if (frame->vs_cmd_start != frame->vs_cmd_end) {
 		cmd |= LIMA_GP_CMD_START_VS;
-	if (frame->plbu_cmd_start != frame->plbu_cmd_end)
+		gp->task |= LIMA_GP_TASK_VS;
+	}
+	if (frame->plbu_cmd_start != frame->plbu_cmd_end) {
 		cmd |= LIMA_GP_CMD_START_PLBU;
+		gp->task |= LIMA_GP_TASK_PLBU;
+	}
 
 	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
 	gp_write(VSCL_END_ADDR, frame->vs_cmd_end);
@@ -135,15 +155,14 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 
 	gp_write(CMD, LIMA_GP_CMD_UPDATE_PLBU_ALLOC);
 	gp_write(CMD, cmd);
-
-	dma_fence_signal(task->fence);
 	return 0;
 }
 
-int lima_gp_init(struct lima_gp *gp)
+static int lima_gp_reset(void *data)
 {
+	struct lima_gp *gp = data;
 	struct lima_device *dev = gp->ip.dev;
-	int timeout, err;
+	int timeout;
 
 	gp_write(INT_MASK, 0);
 	gp_write(INT_CLEAR, LIMA_GP_IRQ_RESET_COMPLETED);
@@ -157,6 +176,20 @@ int lima_gp_init(struct lima_gp *gp)
 		return -ETIMEDOUT;
 	}
 
+	gp_write(INT_CLEAR, LIMA_GP_IRQ_MASK_ALL);
+	gp_write(INT_MASK, LIMA_GP_IRQ_MASK_USED);
+	return 0;
+}
+
+int lima_gp_init(struct lima_gp *gp)
+{
+	struct lima_device *dev = gp->ip.dev;
+	int err;
+
+	err = lima_gp_reset(gp);
+	if (err)
+		return err;
+
 	err = devm_request_irq(dev->dev, gp->ip.irq, lima_gp_irq_handler, 0,
 			       gp->ip.name, gp);
 	if (err) {
@@ -164,10 +197,8 @@ int lima_gp_init(struct lima_gp *gp)
 		return err;
 	}
 
-	gp_write(INT_CLEAR, LIMA_GP_IRQ_MASK_ALL);
-	gp_write(INT_MASK, LIMA_GP_IRQ_MASK_USED);
-
 	gp->pipe.start_task = lima_gp_start_task;
+	gp->pipe.reset = lima_gp_reset;
 	gp->pipe.data = gp;
 	gp->pipe.mmu = &gp->mmu;
 	return 0;

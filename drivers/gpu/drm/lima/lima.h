@@ -58,10 +58,15 @@ struct lima_mmu {
 	bool zap_all;
 };
 
+#define LIMA_GP_TASK_VS    0x01
+#define LIMA_GP_TASK_PLBU  0x02
+
 struct lima_gp {
 	struct lima_ip ip;
 	struct lima_mmu mmu;
 	struct lima_sched_pipe pipe;
+
+	int task;
 };
 
 struct lima_pp {
