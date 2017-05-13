@@ -59,6 +59,7 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 			 fault, LIMA_MMU_STATUS_BUS_ID(status),
 			 status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
 			 mmu->ip.name);
+		lima_vm_print(mmu->vm);
 	}
 
 	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
