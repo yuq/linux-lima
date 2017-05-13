@@ -126,10 +126,11 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 {
 	struct lima_gp *gp = data;
+	struct lima_device *dev = gp->ip.dev;
 	struct drm_lima_m400_gp_frame *frame = task->frame;
 	u32 cmd = 0;
 
-	DRM_INFO("lima start task gp status %08x\n", gp_read(STATUS));
+	dev_info(dev->dev, "lima start task gp status %08x\n", gp_read(STATUS));
 
 	if (frame->vs_cmd_start > frame->vs_cmd_end ||
 	    frame->plbu_cmd_start > frame->plbu_cmd_end ||
@@ -144,6 +145,11 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 	if (frame->plbu_cmd_start != frame->plbu_cmd_end) {
 		cmd |= LIMA_GP_CMD_START_PLBU;
 		gp->task |= LIMA_GP_TASK_PLBU;
+	}
+
+	if (!cmd) {
+		dev_err(dev->dev, "start gp task is empty\n");
+		return -EINVAL;
 	}
 
 	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
