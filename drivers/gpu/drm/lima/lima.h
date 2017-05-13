@@ -115,6 +115,7 @@ void lima_pmu_fini(struct lima_pmu *pmu);
 
 int lima_l2_cache_init(struct lima_l2_cache *l2_cache);
 void lima_l2_cache_fini(struct lima_l2_cache *l2_cache);
+int lima_l2_cache_flush(struct lima_l2_cache *l2_cache);
 
 int lima_mmu_init(struct lima_mmu *mmu);
 void lima_mmu_fini(struct lima_mmu *mmu);
