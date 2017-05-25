@@ -75,8 +75,51 @@ struct drm_lima_m400_gp_frame {
 	__u32 tile_heap_end;
 };
 
+struct drm_lima_m400_pp_frame_reg {
+	__u32 plbu_array_address;
+	__u32 render_address;
+	__u32 unused_0;
+	__u32 flags;
+	__u32 clear_value_depth;
+	__u32 clear_value_stencil;
+	__u32 clear_value_color;
+	__u32 clear_value_color_1;
+	__u32 clear_value_color_2;
+	__u32 clear_value_color_3;
+	__u32 width;
+	__u32 height;
+	__u32 fragment_stack_address;
+	__u32 fragment_stack_size;
+	__u32 unused_1;
+	__u32 unused_2;
+	__u32 one;
+	__u32 supersampled_height;
+	__u32 dubya;
+	__u32 onscreen;
+	__u32 blocking;
+	__u32 scale;
+	__u32 foureight;
+	__u32 pad;
+};
+
+struct drm_lima_m400_pp_wb_reg {
+	__u32 type;
+	__u32 address;
+	__u32 pixel_format;
+	__u32 downsample_factor;
+	__u32 pixel_layout;
+	__u32 pitch;
+	__u32 mrt_bits;
+	__u32 mrt_pitch;
+	__u32 zero;
+	__u32 unused0;
+	__u32 unused1;
+	__u32 unused2;
+};
+
 struct drm_lima_m400_pp_frame {
-	__u32 dummy;
+	struct drm_lima_m400_pp_frame_reg frame;
+	struct drm_lima_m400_pp_wb_reg wb[3];
 };
 
 struct drm_lima_gem_submit {
