@@ -206,7 +206,8 @@ int lima_gp_init(struct lima_gp *gp)
 	gp->pipe.start_task = lima_gp_start_task;
 	gp->pipe.reset = lima_gp_reset;
 	gp->pipe.data = gp;
-	gp->pipe.mmu = &gp->mmu;
+	gp->pipe.mmu[0] = &gp->mmu;
+	gp->pipe.num_mmu = 1;
 	return 0;
 }
 

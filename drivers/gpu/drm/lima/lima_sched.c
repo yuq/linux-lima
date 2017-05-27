@@ -205,7 +205,8 @@ static int lima_sched_pipe_worker(void *param)
 			}
 		}
 
-		lima_mmu_switch_vm(pipe->mmu, task->vm, false);
+		for (i = 0; i < pipe->num_mmu; i++)
+			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
 
 		if (!pipe->start_task(pipe->data, task)) {
 			ret = lima_sched_pipe_worker_wait_fence(task->fence);

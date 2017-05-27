@@ -99,7 +99,7 @@ struct drm_lima_m400_pp_frame_reg {
 	__u32 blocking;
 	__u32 scale;
 	__u32 foureight;
-	__u32 pad;
+	__u32 _pad;
 };
 
 struct drm_lima_m400_pp_wb_reg {
@@ -120,7 +120,14 @@ struct drm_lima_m400_pp_wb_reg {
 struct drm_lima_m400_pp_frame {
 	struct drm_lima_m400_pp_frame_reg frame;
 	struct drm_lima_m400_pp_wb_reg wb[3];
+	__u32 plbu_array_address[4];
+	__u32 fragment_stack_address[4];
+	__u32 num_pp;
+	__u32 _pad;
 };
+
+#define LIMA_PIPE_GP  0x00
+#define LIMA_PIPE_PP  0x01
 
 struct drm_lima_gem_submit {
 	__u32 fence;       /* out */
