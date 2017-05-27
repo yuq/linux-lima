@@ -76,55 +76,56 @@
 	 LIMA_PP_IRQ_CALL_STACK_UNDERFLOW  | \
 	 LIMA_PP_IRQ_CALL_STACK_OVERFLOW)
 
-#define pp_write(reg, data) writel(data, pp->ip.iomem + LIMA_PP_##reg)
-#define pp_read(reg) readl(pp->ip.iomem + LIMA_PP_##reg)
+#define pp_write(reg, data) writel(data, core->ip.iomem + LIMA_PP_##reg)
+#define pp_read(reg) readl(core->ip.iomem + LIMA_PP_##reg)
 
-static irqreturn_t lima_pp_irq_handler(int irq, void *data)
+static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 {
-	struct lima_pp *pp = data;
-	struct lima_device *dev = pp->ip.dev;
+	struct lima_pp_core *core = data;
+	struct lima_device *dev = core->ip.dev;
+	struct lima_pp *pp = dev->pp;
 	u32 state = pp_read(INT_STATUS);
 	u32 status = pp_read(STATUS);
 
 	dev_info_ratelimited(dev->dev, "pp irq state=%x status=%x\n", state, status);
 
-	if (state & LIMA_PP_IRQ_END_OF_FRAME)
+	if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
+	    atomic_dec_and_test(&pp->task))
 		lima_sched_pipe_task_done(&pp->pipe);
 
 	pp_write(INT_CLEAR, state);
 	return IRQ_NONE;
 }
 
-static int lima_pp_start_task(void *data, struct lima_sched_task *task)
+static void lima_pp_core_start_task(struct lima_pp_core *core, int index,
+				    struct lima_sched_task *task)
 {
-	struct lima_pp *pp = data;
-	struct lima_device *dev = pp->ip.dev;
+	struct lima_device *dev = core->ip.dev;
 	struct drm_lima_m400_pp_frame *frame = task->frame;
 	u32 *frame_reg = (void *)&frame->frame;
 	const int num_frame_reg = 23, num_wb_reg = 12;
 	int i, j;
 
-	dev_info(dev->dev, "lima start task pp %s %08x\n", pp->ip.name, pp_read(STATUS));
+	dev_info(dev->dev, "lima start task pp %s %08x\n", core->ip.name, pp_read(STATUS));
+
+	frame->frame.plbu_array_address = frame->plbu_array_address[index];
+	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];
 
 	for (i = 0; i < num_frame_reg; i++)
-		writel(frame_reg[i], pp->ip.iomem + LIMA_PP_FRAME + i * 4);
+		writel(frame_reg[i], core->ip.iomem + LIMA_PP_FRAME + i * 4);
 
 	for (i = 0; i < 3; i++) {
 		u32 *wb_reg = (void *)&frame->wb[i];
-		if (wb_reg[0]) {
-			for (j = 0; j < num_wb_reg; j++)
-				writel(wb_reg[j], pp->ip.iomem + LIMA_PP_WB(i) + j * 4);
-		}
+		for (j = 0; j < num_wb_reg; j++)
+			writel(wb_reg[j], core->ip.iomem + LIMA_PP_WB(i) + j * 4);
 	}
 
 	pp_write(CTRL, LIMA_PP_CTRL_START_RENDERING);
-	return 0;
 }
 
-static int lima_pp_reset(void *data)
+static int lima_pp_core_reset(struct lima_pp_core *core)
 {
-	struct lima_pp *pp = data;
-	struct lima_device *dev = pp->ip.dev;
+	struct lima_device *dev = core->ip.dev;
 	int timeout;
 
 	pp_write(INT_MASK, 0);
@@ -145,30 +146,62 @@ static int lima_pp_reset(void *data)
 	return 0;
 }
 
-int lima_pp_init(struct lima_pp *pp)
+int lima_pp_core_init(struct lima_pp_core *core)
 {
-	struct lima_device *dev = pp->ip.dev;
+	struct lima_device *dev = core->ip.dev;
 	int err;
 
-	err = lima_pp_reset(pp);
+	err = lima_pp_core_reset(core);
 	if (err)
 		return err;
 
-	err = devm_request_irq(dev->dev, pp->ip.irq, lima_pp_irq_handler, 0,
-			       pp->ip.name, pp);
+	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler, 0,
+			       core->ip.name, core);
 	if (err) {
-		dev_err(dev->dev, "pp %s fail to request irq\n", pp->ip.name);
+		dev_err(dev->dev, "pp %s fail to request irq\n", core->ip.name);
 		return err;
 	}
+
+	return 0;
+}
+
+void lima_pp_core_fini(struct lima_pp_core *core)
+{
+	
+}
+
+static int lima_pp_start_task(void *data, struct lima_sched_task *task)
+{
+	struct lima_pp *pp = data;
+	struct drm_lima_m400_pp_frame *frame = task->frame;
+	int i;
+
+	atomic_set(&pp->task, frame->num_pp);
+
+	for (i = 0; i < frame->num_pp; i++)
+		lima_pp_core_start_task(pp->core + i, i, task);
+	return 0;
+}
+
+static int lima_pp_reset(void *data)
+{
+	struct lima_pp *pp = data;
+	int i;
+
+	for (i = 0; i < pp->num_core; i++)
+		lima_pp_core_reset(pp->core + i);
+	return 0;
+}
+
+void lima_pp_init(struct lima_pp *pp)
+{
+	int i;
 
 	pp->pipe.start_task = lima_pp_start_task;
 	pp->pipe.reset = lima_pp_reset;
 	pp->pipe.data = pp;
-	pp->pipe.mmu = &pp->mmu;
-	return 0;
-}
 
-void lima_pp_fini(struct lima_pp *pp)
-{
-	
+	for (i = 0; i < pp->num_core; i++)
+		pp->pipe.mmu[i] = &pp->core[i].mmu;
+	pp->pipe.num_mmu = pp->num_core;
 }
