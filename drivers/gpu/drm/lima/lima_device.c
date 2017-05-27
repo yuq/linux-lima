@@ -109,7 +109,7 @@ static int lima_gp_group_init(struct lima_device *dev)
 	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
 		goto err_out2;
 
-	dev->pipe[dev->num_pipe++] = &gp->pipe;
+	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
 	dev->gp = gp;
 	return 0;
 
@@ -122,45 +122,55 @@ err_out0:
 	return err;
 }
 
-static int lima_pp_group_init(struct lima_device *dev, int index)
+static int lima_pp_group_init(struct lima_device *dev, int n)
 {
-	int err;
+	int err, i;
 	struct lima_pp *pp;
 	char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
-
-	pp_name[2] += index; pp_mmu_name[2] += index;
 
 	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
 	if (!pp)
 		return -ENOMEM;
+	dev->pp = pp;
 
-	if ((err = lima_init_ip(dev, pp_mmu_name, &pp->mmu.ip)) ||
-	    (err = lima_mmu_init(&pp->mmu)))
-		goto err_out0;
+	for (i = 0; i < n; i++) {
+		struct lima_pp_core *core = pp->core + pp->num_core;
 
-	if ((err = lima_init_ip(dev, pp_name, &pp->ip)) ||
-	    (err = lima_pp_init(pp)))
-		goto err_out1;
+		pp_name[2] = '0' + i; pp_mmu_name[2] = '0' + i;
 
-	if ((err = lima_sched_pipe_init(&pp->pipe, pp->ip.name)))
-		goto err_out2;
+		if ((err = lima_init_ip(dev, pp_mmu_name, &core->mmu.ip)) ||
+		    (err = lima_mmu_init(&core->mmu))) {
+			memset(core, 0, sizeof(*core));
+			continue;
+		}
 
-	dev->pipe[dev->num_pipe++] = &pp->pipe;
-	dev->pp[dev->num_pp++] = pp;
+		if ((err = lima_init_ip(dev, pp_name, &core->ip)) ||
+		    (err = lima_pp_core_init(core))) {
+			lima_mmu_fini(&core->mmu);
+			memset(core, 0, sizeof(*core));
+			continue;
+		}
+
+		pp->num_core++;
+	}
+
+	if (pp->num_core != n)
+		dev_warn(dev->dev, "bringup pp %d/%d\n", pp->num_core, n);
+
+	if (pp->num_core == 0)
+		return -ENODEV;
+
+	if ((err = lima_sched_pipe_init(&pp->pipe, "pp")))
+		return err;
+
+	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
+	lima_pp_init(pp);
 	return 0;
-
-err_out2:
-	lima_pp_fini(pp);
-err_out1:
-	lima_mmu_fini(&pp->mmu);
-err_out0:
-	kfree(pp);
-	return err;
 }
 
 int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 {
-	int err, i;
+	int err;
 	struct device_node *np;
 	u32 num_pp;
 
@@ -182,6 +192,7 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 		dev_err(ldev->dev, "too many pp %u\n", num_pp);
 		return -EINVAL;
 	}
+	ldev->num_pp = num_pp;
 
 	err = lima_clk_init(ldev);
 	if (err) {
@@ -223,10 +234,8 @@ int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
 	if ((err = lima_gp_group_init(ldev)))
 		goto err_out;
 
-	for (i = 0; i < num_pp; i++) {
-		if ((err = lima_pp_group_init(ldev, i)))
-			goto err_out;
-	}
+	if ((err = lima_pp_group_init(ldev, num_pp)))
+		goto err_out;
 
 	return 0;
 
@@ -239,15 +248,20 @@ void lima_device_fini(struct lima_device *ldev)
 {
 	int i;
 
-	for (i = 0; i < ldev->num_pp; i++) {
-		lima_sched_pipe_fini(&ldev->pp[i]->pipe);
-		lima_pp_fini(ldev->pp[i]);
-		lima_mmu_fini(&ldev->pp[i]->mmu);
-		kfree(ldev->pp[i]);
+	for (i = 0; i < ARRAY_SIZE(ldev->pipe); i++) {
+		if (ldev->pipe[i])
+			lima_sched_pipe_fini(ldev->pipe[i]);
+	}
+
+	if (ldev->pp) {
+		for (i = 0; i < ldev->pp->num_core; i++) {
+			lima_pp_core_fini(ldev->pp->core + i);
+			lima_mmu_fini(&ldev->pp->core[i].mmu);
+		}
+		kfree(ldev->pp);
 	}
 
 	if (ldev->gp) {
-		lima_sched_pipe_fini(&ldev->gp->pipe);
 		lima_gp_fini(ldev->gp);
 		lima_mmu_fini(&ldev->gp->mmu);
 		kfree(ldev->gp);
