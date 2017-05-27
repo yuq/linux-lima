@@ -37,12 +37,14 @@ struct lima_sched_task {
 	struct dma_fence *fence;
 };
 
+#define LIMA_SCHED_PIPE_MAX_MMU 4
 struct lima_sched_pipe {
 	const char *name;
 
 	u64 fence_context;
 	spinlock_t fence_lock;
-	struct lima_mmu *mmu;
+	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
+	int num_mmu;
 
 	struct task_struct *worker;
 	wait_queue_head_t worker_wait;
