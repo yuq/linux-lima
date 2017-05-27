@@ -97,7 +97,7 @@ err_out0:
 
 int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
 {
-	int err, i;
+	int err, i, j;
 	struct interval_tree_node *it;
 	u32 addr;
 	struct lima_device *dev = vm->dev;
@@ -126,8 +126,10 @@ int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
 
 	mutex_unlock(&vm->lock);
 
-	for (i = 0; i < dev->num_pipe; i++)
-		lima_mmu_zap_vm(dev->pipe[i]->mmu, vm, va, size);
+	for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
+		for (j = 0; j < dev->pipe[i]->num_mmu; j++)
+			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, va, size);
+	}
 
 	return 0;
 
@@ -166,12 +168,14 @@ void lima_vm_release(struct kref *kref)
 	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
 	struct interval_tree_node *it, *tmp;
 	struct lima_device *dev = vm->dev;
-	int i;
+	int i, j;
 
 	/* switch mmu vm to empty vm if this vm is used by it */
 	if (vm != dev->empty_vm) {
-		for (i = 0; i < dev->num_pipe; i++)
-			lima_mmu_switch_vm(dev->pipe[i]->mmu, vm, true);
+		for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
+			for (j = 0; j < dev->pipe[i]->num_mmu; j++)
+				lima_mmu_switch_vm(dev->pipe[i]->mmu[j], vm, true);
+		}
 	}
 
 	if (!RB_EMPTY_ROOT(&vm->va)) {

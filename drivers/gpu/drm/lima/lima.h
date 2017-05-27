@@ -69,13 +69,19 @@ struct lima_gp {
 	int task;
 };
 
-struct lima_pp {
+struct lima_pp_core {
 	struct lima_ip ip;
 	struct lima_mmu mmu;
-	struct lima_sched_pipe pipe;
 };
 
 #define LIMA_MAX_PP 4
+
+struct lima_pp {
+	struct lima_pp_core core[LIMA_MAX_PP];
+	int num_core;
+	struct lima_sched_pipe pipe;
+	atomic_t task;
+};
 
 struct lima_device {
 	struct device *dev;
@@ -92,12 +98,10 @@ struct lima_device {
 
 	struct lima_l2_cache *l2_cache;
 
-	struct lima_sched_pipe *pipe[LIMA_MAX_PP + 1];
-	int num_pipe;
+	struct lima_sched_pipe *pipe[2];
 
 	struct lima_gp *gp;
-
-	struct lima_pp *pp[LIMA_MAX_PP];
+	struct lima_pp *pp;
 	int num_pp;
 
 	struct lima_vm *empty_vm;
@@ -125,8 +129,9 @@ void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size)
 int lima_gp_init(struct lima_gp *gp);
 void lima_gp_fini(struct lima_gp *gp);
 
-int lima_pp_init(struct lima_pp *pp);
-void lima_pp_fini(struct lima_pp *pp);
+int lima_pp_core_init(struct lima_pp_core *core);
+void lima_pp_core_fini(struct lima_pp_core *core);
+void lima_pp_init(struct lima_pp *pp);
 
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 			   u32 size, u32 flags, u32 *handle);
