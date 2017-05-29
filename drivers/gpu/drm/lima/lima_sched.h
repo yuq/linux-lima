@@ -47,7 +47,10 @@ struct lima_sched_pipe {
 	int num_mmu;
 
 	struct task_struct *worker;
-	wait_queue_head_t worker_wait;
+	wait_queue_head_t worker_idle_wait;
+	wait_queue_head_t worker_busy_wait;
+	bool worker_is_busy;
+	bool worker_has_error;
 
 	spinlock_t lock;
 	struct list_head queue;
