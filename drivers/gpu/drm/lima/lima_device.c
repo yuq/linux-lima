@@ -110,6 +110,7 @@ static int lima_gp_group_init(struct lima_device *dev)
 		goto err_out2;
 
 	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
+	gp->mmu.pipe = &gp->pipe;
 	dev->gp = gp;
 	return 0;
 
@@ -164,6 +165,8 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
 		return err;
 
 	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
+	for (i = 0; i < pp->num_core; i++)
+		pp->core[i].mmu.pipe = &pp->pipe;
 	lima_pp_init(pp);
 	return 0;
 }
