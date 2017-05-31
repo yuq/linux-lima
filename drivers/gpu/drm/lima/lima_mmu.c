@@ -59,14 +59,16 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 			 fault, LIMA_MMU_STATUS_BUS_ID(status),
 			 status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
 			 mmu->ip.name);
-		lima_vm_print(mmu->vm);
+		//lima_vm_print(mmu->vm);
 	}
 
 	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
 		dev_info(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
 	}
 
-	mmu_write(INT_CLEAR, LIMA_MMU_INT_PAGE_FAULT|LIMA_MMU_INT_READ_BUS_ERROR);
+	lima_sched_pipe_task_done(mmu->pipe, true);
+
+	mmu_write(INT_CLEAR, status);
 	return IRQ_NONE;
 }
 
@@ -156,4 +158,26 @@ void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size)
 	if (mmu->vm == vm)
 	        mmu->zap_all = true;
 	spin_unlock(&mmu->lock);
+}
+
+void lima_mmu_page_fault_resume(struct lima_mmu *mmu)
+{
+	struct lima_device *dev = mmu->ip.dev;
+	u32 status = mmu_read(STATUS);
+
+	if (status & LIMA_MMU_STATUS_PAGE_FAULT_ACTIVE) {
+		dev_info(dev->dev, "mmu resume\n");
+
+	        spin_lock(&mmu->lock);
+		mmu->vm = dev->empty_vm;
+		spin_unlock(&mmu->lock);
+
+		mmu_write(INT_MASK, 0);
+		mmu_write(DTE_ADDR, 0xCAFEBABE);
+		lima_mmu_send_command(LIMA_MMU_COMMAND_HARD_RESET, mmu_read(DTE_ADDR) == 0);
+	        mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
+		mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
+		lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
+				      mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
+	}
 }
