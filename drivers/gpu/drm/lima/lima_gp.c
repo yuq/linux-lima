@@ -78,10 +78,8 @@
 	 LIMA_GP_IRQ_SEMAPHORE_OVERFLOW  | \
 	 LIMA_GP_IRQ_PTR_ARRAY_OUT_OF_BOUNDS)
 
-#define LIMA_GP_IRQ_MASK_USED		   \
-	(				   \
-	 LIMA_GP_IRQ_VS_END_CMD_LST      | \
-	 LIMA_GP_IRQ_PLBU_END_CMD_LST    | \
+#define LIMA_GP_IRQ_MASK_ERROR             \
+	(                                  \
 	 LIMA_GP_IRQ_PLBU_OUT_OF_MEM     | \
 	 LIMA_GP_IRQ_FORCE_HANG          | \
 	 LIMA_GP_IRQ_WRITE_BOUND_ERR     | \
@@ -93,6 +91,13 @@
 	 LIMA_GP_IRQ_SEMAPHORE_OVERFLOW  | \
 	 LIMA_GP_IRQ_PTR_ARRAY_OUT_OF_BOUNDS)
 
+#define LIMA_GP_IRQ_MASK_USED		   \
+	(				   \
+	 LIMA_GP_IRQ_VS_END_CMD_LST      | \
+	 LIMA_GP_IRQ_PLBU_END_CMD_LST    | \
+	 LIMA_GP_IRQ_MASK_ERROR)
+
+
 #define gp_write(reg, data) writel(data, gp->ip.iomem + LIMA_GP_##reg)
 #define gp_read(reg) readl(gp->ip.iomem + LIMA_GP_##reg)
 
@@ -101,23 +106,29 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	struct lima_gp *gp = data;
 	struct lima_device *dev = gp->ip.dev;
 	u32 state = gp_read(INT_STAT);
-	u32 status = gp_read(STATUS);
-	bool task_done = false;
 
-	dev_info_ratelimited(dev->dev, "gp irq state=%x status=%x\n", state, status);
-
-	if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
-		gp->task &= ~LIMA_GP_TASK_VS;
-		task_done = true;
+	if (state & LIMA_GP_IRQ_MASK_ERROR) {
+		u32 status = gp_read(STATUS);
+		dev_info(dev->dev, "gp error irq state=%x status=%x\n",
+			 state, status);
+		lima_sched_pipe_task_done(&gp->pipe, true);
 	}
+	else {
+		bool task_done = false;
 
-	if (state & LIMA_GP_IRQ_PLBU_END_CMD_LST) {
-		gp->task &= ~LIMA_GP_TASK_PLBU;
-		task_done = true;
+		if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
+			gp->task &= ~LIMA_GP_TASK_VS;
+			task_done = true;
+		}
+
+		if (state & LIMA_GP_IRQ_PLBU_END_CMD_LST) {
+			gp->task &= ~LIMA_GP_TASK_PLBU;
+			task_done = true;
+		}
+
+		if (task_done && !gp->task)
+			lima_sched_pipe_task_done(&gp->pipe, false);
 	}
-
-	if (task_done && !gp->task)
-		lima_sched_pipe_task_done(&gp->pipe);
 
 	gp_write(INT_CLEAR, state);
 	return IRQ_NONE;
@@ -164,9 +175,8 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 	return 0;
 }
 
-static int lima_gp_reset(void *data)
+static int lima_gp_soft_reset(struct lima_gp *gp)
 {
-	struct lima_gp *gp = data;
 	struct lima_device *dev = gp->ip.dev;
 	int timeout;
 
@@ -187,12 +197,51 @@ static int lima_gp_reset(void *data)
 	return 0;
 }
 
+static int lima_gp_hard_reset(struct lima_gp *gp)
+{
+	struct lima_device *dev = gp->ip.dev;
+	int timeout;
+
+	gp_write(CMD, LIMA_GP_CMD_STOP_BUS);
+	for (timeout = 1000; timeout > 0; timeout--) {
+		if (gp_read(STATUS) & LIMA_GP_STATUS_BUS_STOPPED)
+			break;
+	}
+	if (!timeout) {
+		dev_err(dev->dev, "gp stop bus timeout\n");
+		return -ETIMEDOUT;
+	}
+
+	gp_write(PERF_CNT_0_LIMIT, 0xC0FFE000);
+	gp_write(INT_MASK, 0);
+	gp_write(CMD, LIMA_GP_CMD_RESET);
+	for (timeout = 1000; timeout > 0; timeout--) {
+		gp_write(PERF_CNT_0_LIMIT, 0xC01A0000);
+		if (gp_read(PERF_CNT_0_LIMIT) == 0xC01A0000)
+			break;
+	}
+	if (!timeout) {
+		dev_err(dev->dev, "gp hard reset timeout\n");
+		return -ETIMEDOUT;
+	}
+
+	gp_write(PERF_CNT_0_LIMIT, 0);
+	gp_write(INT_CLEAR, LIMA_GP_IRQ_MASK_ALL);
+	gp_write(INT_MASK, LIMA_GP_IRQ_MASK_USED);
+	return 0;
+}
+
+static int lima_gp_reset(void *data)
+{
+	return lima_gp_hard_reset(data);
+}
+
 int lima_gp_init(struct lima_gp *gp)
 {
 	struct lima_device *dev = gp->ip.dev;
 	int err;
 
-	err = lima_gp_reset(gp);
+	err = lima_gp_soft_reset(gp);
 	if (err)
 		return err;
 

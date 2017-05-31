@@ -52,6 +52,7 @@ struct lima_l2_cache {
 
 struct lima_mmu {
 	struct lima_ip ip;
+	struct lima_sched_pipe *pipe;
 
 	spinlock_t lock;
 	struct lima_vm *vm;
@@ -125,6 +126,7 @@ int lima_mmu_init(struct lima_mmu *mmu);
 void lima_mmu_fini(struct lima_mmu *mmu);
 void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset);
 void lima_mmu_zap_vm(struct lima_mmu *mmu, struct lima_vm *vm, u32 va, u32 size);
+void lima_mmu_page_fault_resume(struct lima_mmu *mmu);
 
 int lima_gp_init(struct lima_gp *gp);
 void lima_gp_fini(struct lima_gp *gp);
