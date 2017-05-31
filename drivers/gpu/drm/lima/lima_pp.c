@@ -66,15 +66,19 @@
 	 LIMA_PP_IRQ_CALL_STACK_OVERFLOW   | \
 	 LIMA_PP_IRQ_RESET_COMPLETED)
 
-#define LIMA_PP_IRQ_MASK_USED                \
+#define LIMA_PP_IRQ_MASK_ERROR               \
 	(                                    \
-	 LIMA_PP_IRQ_END_OF_FRAME          | \
 	 LIMA_PP_IRQ_FORCE_HANG            | \
 	 LIMA_PP_IRQ_BUS_ERROR             | \
 	 LIMA_PP_IRQ_WRITE_BOUNDARY_ERROR  | \
 	 LIMA_PP_IRQ_INVALID_PLIST_COMMAND | \
 	 LIMA_PP_IRQ_CALL_STACK_UNDERFLOW  | \
 	 LIMA_PP_IRQ_CALL_STACK_OVERFLOW)
+
+#define LIMA_PP_IRQ_MASK_USED                \
+	(                                    \
+	 LIMA_PP_IRQ_END_OF_FRAME          | \
+	 LIMA_PP_IRQ_MASK_ERROR)
 
 #define pp_write(reg, data) writel(data, core->ip.iomem + LIMA_PP_##reg)
 #define pp_read(reg) readl(core->ip.iomem + LIMA_PP_##reg)
@@ -85,13 +89,18 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	struct lima_device *dev = core->ip.dev;
 	struct lima_pp *pp = dev->pp;
 	u32 state = pp_read(INT_STATUS);
-	u32 status = pp_read(STATUS);
 
-	dev_info_ratelimited(dev->dev, "pp irq state=%x status=%x\n", state, status);
-
-	if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
-	    atomic_dec_and_test(&pp->task))
-		lima_sched_pipe_task_done(&pp->pipe);
+	if (state & LIMA_PP_IRQ_MASK_ERROR) {
+		u32 status = pp_read(STATUS);
+		dev_info(dev->dev, "pp error irq state=%x status=%x\n",
+			 state, status);
+		lima_sched_pipe_task_done(&pp->pipe, true);
+	}
+	else {
+		if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
+		    atomic_dec_and_test(&pp->task))
+			lima_sched_pipe_task_done(&pp->pipe, false);
+	}
 
 	pp_write(INT_CLEAR, state);
 	return IRQ_NONE;
@@ -146,6 +155,40 @@ static int lima_pp_core_reset(struct lima_pp_core *core)
 	return 0;
 }
 
+static int lima_pp_core_hard_reset(struct lima_pp_core *core)
+{
+	struct lima_device *dev = core->ip.dev;
+	int timeout;
+/*
+	pp_write(CTRL, LIMA_PP_CTRL_STOP_BUS);
+	for (timeout = 1000; timeout > 0; timeout--) {
+		if (pp_read(STATUS) & LIMA_PP_STATUS_BUS_STOPPED)
+			break;
+	}
+	if (!timeout) {
+		dev_err(dev->dev, "pp stop bus timeout\n");
+		return -ETIMEDOUT;
+	}
+*/
+	pp_write(PERF_CNT_0_LIMIT, 0xC0FFE000);
+	pp_write(INT_MASK, 0);
+	pp_write(CTRL, LIMA_PP_CTRL_FORCE_RESET);
+	for (timeout = 1000; timeout > 0; timeout--) {
+		pp_write(PERF_CNT_0_LIMIT, 0xC01A0000);
+		if (pp_read(PERF_CNT_0_LIMIT) == 0xC01A0000)
+			break;
+	}
+	if (!timeout) {
+		dev_err(dev->dev, "pp hard reset timeout\n");
+		return -ETIMEDOUT;
+	}
+
+	pp_write(PERF_CNT_0_LIMIT, 0);
+	pp_write(INT_CLEAR, LIMA_PP_IRQ_MASK_ALL);
+	pp_write(INT_MASK, LIMA_PP_IRQ_MASK_USED);
+	return 0;
+}
+
 int lima_pp_core_init(struct lima_pp_core *core)
 {
 	struct lima_device *dev = core->ip.dev;
@@ -189,7 +232,7 @@ static int lima_pp_reset(void *data)
 	int i;
 
 	for (i = 0; i < pp->num_core; i++)
-		lima_pp_core_reset(pp->core + i);
+		lima_pp_core_hard_reset(pp->core + i);
 	return 0;
 }
 

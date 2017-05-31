@@ -243,8 +243,10 @@ static int lima_sched_pipe_worker(void *param)
 			if (ret == -ERESTARTSYS)
 				return 0;
 			if (ret < 0 || pipe->worker_has_error) {
-				DRM_INFO("lima worker wait task fence error %d\n", ret);
+				DRM_INFO("lima worker wait task error\n");
 				pipe->reset(pipe->data);
+				for (i = 0; i < pipe->num_mmu; i++)
+					lima_mmu_page_fault_resume(pipe->mmu[i]);
 			}
 			else
 				dma_fence_signal(task->fence);
@@ -364,8 +366,11 @@ int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 time
 	return ret;
 }
 
-void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe)
+void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
 {
+	if (error)
+		pipe->worker_has_error = true;
+
 	pipe->worker_is_busy = false;
 	wake_up(&pipe->worker_busy_wait);
 }
