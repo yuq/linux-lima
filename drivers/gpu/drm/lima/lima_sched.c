@@ -297,7 +297,7 @@ void lima_sched_pipe_fini(struct lima_sched_pipe *pipe)
 	}
 }
 
-static unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
+unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
 {
 	unsigned long timeout_jiffies;
 	ktime_t timeout;
