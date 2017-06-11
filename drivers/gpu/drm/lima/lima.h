@@ -145,5 +145,8 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
 int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
 		    void *frame, u32 *fence);
+int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
+
+unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
 
 #endif
