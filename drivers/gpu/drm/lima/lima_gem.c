@@ -400,3 +400,28 @@ out0:
 	kfree(lbos);
 	return err;
 }
+
+int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
+{
+	bool write = op & LIMA_GEM_WAIT_WRITE;
+	struct drm_gem_object *obj;
+	struct lima_bo *bo;
+	int ret;
+	unsigned long timeout;
+
+	obj = drm_gem_object_lookup(file, handle);
+	if (!obj)
+		return -ENOENT;
+
+	bo = to_lima_bo(obj);
+
+	timeout = timeout_ns ? lima_timeout_to_jiffies(timeout_ns) : 0;
+	ret = reservation_object_wait_timeout_rcu(&bo->resv, write, true, timeout);
+	if (ret == 0)
+		ret = timeout ? -ETIMEDOUT : -EBUSY;
+	else if (ret > 0)
+		ret = 0;
+
+	drm_gem_object_unreference_unlocked(obj);
+	return ret;
+}
