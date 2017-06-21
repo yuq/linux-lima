@@ -59,7 +59,7 @@ struct lima_sched_pipe {
 	u32 fence_done_seqno;
 
 	int (*start_task)(void *data, struct lima_sched_task *task);
-	int (*reset)(void *data);
+	int (*end_task)(void *data, bool fail);
 	void *data;
 };
 
