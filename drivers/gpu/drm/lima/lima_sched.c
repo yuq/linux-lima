@@ -239,12 +239,17 @@ static int lima_sched_pipe_worker(void *param)
 		pipe->worker_is_busy = true;
 		pipe->worker_has_error = false;
 		if (!pipe->start_task(pipe->data, task)) {
+			bool fail;
+
 			ret = lima_sched_pipe_worker_wait_busy(pipe);
 			if (ret == -ERESTARTSYS)
 				return 0;
-			if (ret < 0 || pipe->worker_has_error) {
+
+			fail = ret < 0 || pipe->worker_has_error;
+			pipe->end_task(pipe->data, fail);
+
+			if (fail) {
 				DRM_INFO("lima worker wait task error\n");
-				pipe->reset(pipe->data);
 				for (i = 0; i < pipe->num_mmu; i++)
 					lima_mmu_page_fault_resume(pipe->mmu[i]);
 			}
