@@ -204,7 +204,7 @@ err_out0:
 	return err;
 }
 
-static void lima_drm_driver_preclose(struct drm_device *dev, struct drm_file *file)
+static void lima_drm_driver_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct lima_drm_priv *priv = file->driver_priv;
 
@@ -240,7 +240,7 @@ static struct drm_driver lima_drm_driver = {
 	.load		    = lima_drm_driver_load,
 	.unload             = lima_drm_driver_unload,
 	.open               = lima_drm_driver_open,
-	.preclose           = lima_drm_driver_preclose,
+	.postclose          = lima_drm_driver_postclose,
 	.ioctls             = lima_drm_driver_ioctls,
 	.num_ioctls         = ARRAY_SIZE(lima_drm_driver_ioctls),
 	.fops               = &lima_drm_driver_fops,
