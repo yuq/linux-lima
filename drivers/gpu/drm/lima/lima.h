@@ -68,11 +68,13 @@ struct lima_gp {
 	struct lima_sched_pipe pipe;
 
 	int task;
+	bool async_reset;
 };
 
 struct lima_pp_core {
 	struct lima_ip ip;
 	struct lima_mmu mmu;
+	bool async_reset;
 };
 
 #define LIMA_MAX_PP 4
