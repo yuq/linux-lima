@@ -233,6 +233,18 @@ static int lima_sched_pipe_worker(void *param)
 			}
 		}
 
+		/* this is needed for MMU to work correctly, otherwise GP/PP
+		 * will hang or page fault for unknown reason after running for
+		 * a while.
+		 *
+		 * Need to investigate:
+		 * 1. is it related to TLB
+		 * 2. how much performance will be affected by L2 cache flush
+		 * 3. can we reduce the calling of this function because all
+		 *    GP/PP use the same L2 cache
+		 */
+		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
+
 		for (i = 0; i < pipe->num_mmu; i++)
 			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
 
