@@ -27,6 +27,7 @@
 #include <linux/kref.h>
 
 #define LIMA_PAGE_SIZE    4096
+#define LIMA_PAGE_MASK    (LIMA_PAGE_SIZE - 1)
 #define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
 
 struct lima_device;
