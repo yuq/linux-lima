@@ -187,6 +187,12 @@ void lima_vm_release(struct kref *kref)
 		kfree(it);
 	}
 
+	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
+		if (vm->pts[i].cpu)
+			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
+					  vm->pts[i].cpu, vm->pts[i].dma);
+	}
+
 	if (vm->pd.cpu)
 		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
 
