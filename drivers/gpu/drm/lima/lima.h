@@ -114,7 +114,7 @@ struct lima_drm_priv {
 	struct lima_vm *vm;
 };
 
-int lima_device_init(struct lima_device *ldev, struct drm_device *dev);
+int lima_device_init(struct lima_device *ldev);
 void lima_device_fini(struct lima_device *ldev);
 
 int lima_pmu_init(struct lima_pmu *pmu);
