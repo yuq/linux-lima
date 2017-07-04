@@ -171,15 +171,11 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
 	return 0;
 }
 
-int lima_device_init(struct lima_device *ldev, struct drm_device *dev)
+int lima_device_init(struct lima_device *ldev)
 {
 	int err;
 	struct device_node *np;
 	u32 num_pp;
-
-	ldev->pdev = dev->platformdev;
-	ldev->dev = &dev->platformdev->dev;
-	ldev->ddev = dev;
 
 	dma_set_coherent_mask(ldev->dev, DMA_BIT_MASK(32));
 

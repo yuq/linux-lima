@@ -144,42 +144,6 @@ static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_fi
 	return lima_gem_wait(file, args->handle, args->op, args->timeout_ns);
 }
 
-static int lima_drm_driver_load(struct drm_device *dev, unsigned long flags)
-{
-	struct lima_device *ldev;
-	int err;
-
-	ldev = kzalloc(sizeof(*ldev), GFP_KERNEL);
-	if (!ldev)
-		return -ENOMEM;
-
-	dev->dev_private = (void *)ldev;
-
-	err = lima_device_init(ldev, dev);
-	if (err) {
-		dev_err(&dev->platformdev->dev, "Fatal error during GPU init\n");
-		goto err0;
-	}
-
-	platform_set_drvdata(dev->platformdev, dev);
-
-	return 0;
-
-err0:
-	kfree(ldev);
-	return err;
-}
-
-static int lima_drm_driver_unload(struct drm_device *dev)
-{
-	struct lima_device *ldev = to_lima_dev(dev);
-
-	lima_device_fini(ldev);
-	kfree(ldev);
-	dev->dev_private = NULL;
-	return 0;
-}
-
 static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 {
 	int err;
@@ -237,8 +201,6 @@ static const struct file_operations lima_drm_driver_fops = {
 
 static struct drm_driver lima_drm_driver = {
 	.driver_features    = DRIVER_RENDER | DRIVER_GEM,
-	.load		    = lima_drm_driver_load,
-	.unload             = lima_drm_driver_unload,
 	.open               = lima_drm_driver_open,
 	.postclose          = lima_drm_driver_postclose,
 	.ioctls             = lima_drm_driver_ioctls,
@@ -255,12 +217,58 @@ static struct drm_driver lima_drm_driver = {
 
 static int lima_pdev_probe(struct platform_device *pdev)
 {
-	return drm_platform_init(&lima_drm_driver, pdev);
+	struct lima_device *ldev;
+	struct drm_device *ddev;
+	int err;
+
+	ldev = devm_kzalloc(&pdev->dev, sizeof(*ldev), GFP_KERNEL);
+	if (!ldev)
+		return -ENOMEM;
+
+	ldev->pdev = pdev;
+	ldev->dev = &pdev->dev;
+
+	platform_set_drvdata(pdev, ldev);
+
+	/* Allocate and initialize the DRM device. */
+	ddev = drm_dev_alloc(&lima_drm_driver, &pdev->dev);
+	if (IS_ERR(ddev))
+		return PTR_ERR(ddev);
+
+	ddev->dev_private = ldev;
+	ldev->ddev = ddev;
+
+	err = lima_device_init(ldev);
+	if (err) {
+		dev_err(&pdev->dev, "Fatal error during GPU init\n");
+		goto err_out0;
+	}
+
+	/*
+	 * Register the DRM device with the core and the connectors with
+	 * sysfs.
+	 */
+	err = drm_dev_register(ddev, 0);
+	if (err < 0)
+		goto err_out1;
+
+	return 0;
+
+err_out1:
+	lima_device_fini(ldev);
+err_out0:
+	drm_dev_unref(ddev);
+	return err;
 }
 
 static int lima_pdev_remove(struct platform_device *pdev)
 {
-	drm_put_dev(platform_get_drvdata(pdev));
+	struct lima_device *ldev = platform_get_drvdata(pdev);
+	struct drm_device *ddev = ldev->ddev;
+
+	drm_dev_unregister(ddev);
+	lima_device_fini(ldev);
+	drm_dev_unref(ddev);
 	return 0;
 }
 
