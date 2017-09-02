@@ -205,8 +205,8 @@ int lima_pp_core_init(struct lima_pp_core *core)
 	if (err)
 		return err;
 
-	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler, 0,
-			       core->ip.name, core);
+	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler,
+			       IRQF_SHARED, core->ip.name, core);
 	if (err) {
 		dev_err(dev->dev, "pp %s fail to request irq\n", core->ip.name);
 		return err;
