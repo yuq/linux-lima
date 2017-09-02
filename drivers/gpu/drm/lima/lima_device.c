@@ -127,7 +127,7 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
 {
 	int err, i;
 	struct lima_pp *pp;
-	char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
+	char pp_name[4], pp_mmu_name[7];
 
 	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
 	if (!pp)
@@ -137,7 +137,8 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
 	for (i = 0; i < n; i++) {
 		struct lima_pp_core *core = pp->core + pp->num_core;
 
-		pp_name[2] = '0' + i; pp_mmu_name[2] = '0' + i;
+		snprintf(pp_name, sizeof(pp_name), "pp%d", i);
+		snprintf(pp_mmu_name, sizeof(pp_mmu_name), "pp%dmmu", i);
 
 		if ((err = lima_init_ip(dev, pp_mmu_name, &core->mmu.ip)) ||
 		    (err = lima_mmu_init(&core->mmu))) {
