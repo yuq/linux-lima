@@ -92,6 +92,7 @@ struct lima_device {
 	struct platform_device *pdev;
 
 	enum lima_gpu_type gpu_type;
+	void __iomem *iomem;
 
 	struct clk *clk_bus;
 	struct clk *clk_gpu;
