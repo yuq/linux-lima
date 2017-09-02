@@ -31,6 +31,17 @@ enum lima_gpu_type {
 	GPU_MALI400 = 0,
 };
 
+#define LIMA_MALI200_PP_BASE		0x0000
+#define LIMA_MALI200_GP_BASE		0x2000
+#define LIMA_MALI200_MMU_BASE		0x3000
+
+#define LIMA_GP_BASE			0x0000
+#define LIMA_L2_BASE			0x1000
+#define LIMA_PMU_BASE			0x2000
+#define LIMA_GPMMU_BASE			0x3000
+#define LIMA_PPMMU_BASE(_pp)		0x4000 + 0x1000 * (_pp)
+#define LIMA_PP_BASE(_pp)		0x8000 + 0x2000 * (_pp)
+
 struct lima_device;
 
 #define LIMA_IP_MAX_NAME_LEN 32
@@ -38,7 +49,7 @@ struct lima_device;
 struct lima_ip {
 	struct lima_device *dev;
 	char name[LIMA_IP_MAX_NAME_LEN];
-	void __iomem *iomem;
+	u32 offset;
 	int irq;
 };
 
@@ -92,6 +103,7 @@ struct lima_device {
 	struct platform_device *pdev;
 
 	enum lima_gpu_type gpu_type;
+	void __iomem *regs;
 
 	struct clk *clk_bus;
 	struct clk *clk_gpu;

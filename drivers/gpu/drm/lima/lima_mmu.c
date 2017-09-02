@@ -28,8 +28,8 @@
 #define   LIMA_MMU_INT_READ_BUS_ERROR       0x02
 #define LIMA_MMU_INT_STATUS		  0x0020
 
-#define mmu_write(reg, data) writel(data, mmu->ip.iomem + LIMA_MMU_##reg)
-#define mmu_read(reg) readl(mmu->ip.iomem + LIMA_MMU_##reg)
+#define mmu_write(reg, data) writel(data, mmu->ip.dev->regs + mmu->ip.offset + LIMA_MMU_##reg)
+#define mmu_read(reg) readl(mmu->ip.dev->regs + mmu->ip.offset + LIMA_MMU_##reg)
 
 #define lima_mmu_send_command(command, condition)	     \
 ({							     \

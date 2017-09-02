@@ -80,8 +80,8 @@
 	 LIMA_PP_IRQ_END_OF_FRAME          | \
 	 LIMA_PP_IRQ_MASK_ERROR)
 
-#define pp_write(reg, data) writel(data, core->ip.iomem + LIMA_PP_##reg)
-#define pp_read(reg) readl(core->ip.iomem + LIMA_PP_##reg)
+#define pp_write(reg, data) writel(data, core->ip.dev->regs + core->ip.offset + LIMA_PP_##reg)
+#define pp_read(reg) readl(core->ip.dev->regs + core->ip.offset + LIMA_PP_##reg)
 
 static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 {
@@ -159,12 +159,12 @@ static void lima_pp_core_start_task(struct lima_pp_core *core, int index,
 	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];
 
 	for (i = 0; i < num_frame_reg; i++)
-		writel(frame_reg[i], core->ip.iomem + LIMA_PP_FRAME + i * 4);
+		writel(frame_reg[i], core->ip.dev->regs + core->ip.offset + LIMA_PP_FRAME + i * 4);
 
 	for (i = 0; i < 3; i++) {
 		u32 *wb_reg = (void *)&frame->wb[i];
 		for (j = 0; j < num_wb_reg; j++)
-			writel(wb_reg[j], core->ip.iomem + LIMA_PP_WB(i) + j * 4);
+			writel(wb_reg[j], core->ip.dev->regs + core->ip.offset + LIMA_PP_WB(i) + j * 4);
 	}
 
 	pp_write(CTRL, LIMA_PP_CTRL_START_RENDERING);

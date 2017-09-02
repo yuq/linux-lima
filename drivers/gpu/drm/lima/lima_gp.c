@@ -98,8 +98,8 @@
 	 LIMA_GP_IRQ_MASK_ERROR)
 
 
-#define gp_write(reg, data) writel(data, gp->ip.iomem + LIMA_GP_##reg)
-#define gp_read(reg) readl(gp->ip.iomem + LIMA_GP_##reg)
+#define gp_write(reg, data) writel(data, gp->ip.dev->regs + gp->ip.offset + LIMA_GP_##reg)
+#define gp_read(reg) readl(gp->ip.dev->regs + gp->ip.offset + LIMA_GP_##reg)
 
 static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 {

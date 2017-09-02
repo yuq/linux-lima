@@ -219,7 +219,8 @@ static int lima_pdev_probe(struct platform_device *pdev)
 {
 	struct lima_device *ldev;
 	struct drm_device *ddev;
-	int err;
+	struct resource *res;
+	int err, i;
 
 	ldev = devm_kzalloc(&pdev->dev, sizeof(*ldev), GFP_KERNEL);
 	if (!ldev)
@@ -229,6 +230,27 @@ static int lima_pdev_probe(struct platform_device *pdev)
 	ldev->dev = &pdev->dev;
 
 	platform_set_drvdata(pdev, ldev);
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	ldev->regs = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(ldev->regs)) {
+		dev_err(&pdev->dev, "fail to ioremap iomem\n");
+		return PTR_ERR(ldev->regs);
+	}
+
+	/* Get the number of PPs */
+	for (i = 0; i < LIMA_MAX_PP + 1; i++) {
+		char pp_name[4];
+		int irq;
+
+		snprintf(pp_name, sizeof(pp_name), "pp%d", i);
+		irq = platform_get_irq_byname(pdev, pp_name);
+		if (irq < 0) {
+			dev_dbg(ldev->dev, "found %d PPs\n", i);
+			ldev->num_pp = i;
+			break;
+		}
+	}
 
 	/* Allocate and initialize the DRM device. */
 	ddev = drm_dev_alloc(&lima_drm_driver, &pdev->dev);
@@ -271,7 +293,7 @@ static int lima_pdev_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id dt_match[] = {
-	{ .compatible = "arm,mali400" },
+	{ .compatible = "arm,mali-400" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);
