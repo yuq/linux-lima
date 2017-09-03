@@ -16,8 +16,8 @@
 #define LIMA_L2_CACHE_PERFCNT_SRC1	 0x0028
 #define LIMA_L2_CACHE_ERFCNT_VAL1	 0x002C
 
-#define l2_cache_write(reg, data) writel(data, l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
-#define l2_cache_read(reg) readl(l2_cache->ip.iomem + LIMA_L2_CACHE_##reg)
+#define l2_cache_write(reg, data) writel(data, l2_cache->ip.dev->regs + l2_cache->ip.offset + LIMA_L2_CACHE_##reg)
+#define l2_cache_read(reg) readl(l2_cache->ip.dev->regs + l2_cache->ip.offset + LIMA_L2_CACHE_##reg)
 
 static int lima_l2_cache_wait_idle(struct lima_l2_cache *l2_cache)
 {

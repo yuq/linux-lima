@@ -12,8 +12,8 @@
 #define   LIMA_PMU_INT_CMD_MASK            (1 << 0)
 #define LIMA_PMU_SW_DELAY                  0x1C
 
-#define pmu_write(reg, data) writel(data, pmu->ip.iomem + LIMA_PMU_##reg)
-#define pmu_read(reg) readl(pmu->ip.iomem + LIMA_PMU_##reg)
+#define pmu_write(reg, data) printk("writing 0x%x\n", (int)(pmu->ip.dev->regs + pmu->ip.offset + LIMA_PMU_##reg)); writel(data, pmu->ip.dev->regs + pmu->ip.offset + LIMA_PMU_##reg)
+#define pmu_read(reg) printk("reading 0x%x\n", (int)(pmu->ip.dev->regs + pmu->ip.offset + LIMA_PMU_##reg)); readl(pmu->ip.dev->regs + pmu->ip.offset + LIMA_PMU_##reg)
 
 static int lima_pmu_wait_cmd(struct lima_pmu *pmu)
 {
