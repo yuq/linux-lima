@@ -247,10 +247,41 @@ static int lima_gp_end_task(void *data, bool fail)
 	return 0;
 }
 
+static void lima_gp_print_version(struct lima_gp *gp)
+{
+	u32 version, major, minor;
+	char *name;
+
+	version = gp_read(VERSION);
+	major = (version >> 8) & 0xFF;
+	minor = version & 0xFF;
+	switch (version >> 16) {
+	case 0xA07:
+	    name = "mali200";
+		break;
+	case 0xC07:
+		name = "mali300";
+		break;
+	case 0xB07:
+		name = "mali400";
+		break;
+	case 0xD07:
+		name = "mali450";
+		break;
+	default:
+		name = "unknow";
+		break;
+	}
+	dev_info(gp->ip.dev->dev, "%s - %s version major %d minor %d\n",
+		 gp->ip.name, name, major, minor);
+}
+
 int lima_gp_init(struct lima_gp *gp)
 {
 	struct lima_device *dev = gp->ip.dev;
 	int err;
+
+	lima_gp_print_version(gp);
 
 	gp->async_reset = false;
 	lima_gp_soft_reset_async(gp);
