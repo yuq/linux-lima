@@ -194,10 +194,41 @@ static int lima_pp_core_hard_reset(struct lima_pp_core *core)
 	return 0;
 }
 
+static void lima_pp_print_version(struct lima_pp_core *core)
+{
+	u32 version, major, minor;
+	char *name;
+
+	version = pp_read(VERSION);
+	major = (version >> 8) & 0xFF;
+	minor = version & 0xFF;
+	switch (version >> 16) {
+	case 0xC807:
+	    name = "mali200";
+		break;
+	case 0xCE07:
+		name = "mali300";
+		break;
+	case 0xCD07:
+		name = "mali400";
+		break;
+	case 0xCF07:
+		name = "mali450";
+		break;
+	default:
+		name = "unknow";
+		break;
+	}
+	dev_info(core->ip.dev->dev, "%s - %s version major %d minor %d\n",
+		 core->ip.name, name, major, minor);
+}
+
 int lima_pp_core_init(struct lima_pp_core *core)
 {
 	struct lima_device *dev = core->ip.dev;
 	int err;
+
+	lima_pp_print_version(core);
 
 	core->async_reset = false;
 	lima_pp_core_soft_reset_async(core);
