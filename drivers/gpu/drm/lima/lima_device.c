@@ -127,7 +127,7 @@ static int lima_pp_group_init(struct lima_device *dev, int n)
 {
 	int err, i;
 	struct lima_pp *pp;
-	char *pp_name = "pp0", *pp_mmu_name = "pp0-mmu";
+	char pp_name[] = "pp0", pp_mmu_name[] = "pp0-mmu";
 
 	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
 	if (!pp)
