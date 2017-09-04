@@ -142,8 +142,9 @@ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 	return 0;
 }
 
-static int lima_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+static int lima_gem_fault(struct vm_fault *vmf)
 {
+	struct vm_area_struct *vma = vmf->vma;
 	struct lima_bo *bo = to_lima_bo(vma->vm_private_data);
 
 	dev_err(bo->gem.dev->dev, "unexpected vm fault %lx\n", vmf->address);
