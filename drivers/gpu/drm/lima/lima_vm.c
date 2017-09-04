@@ -159,7 +159,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 {
 	struct lima_vm *vm;
 
-	vm = drm_calloc_large(1, sizeof(*vm));
+	vm = kvzalloc(sizeof(*vm), GFP_KERNEL);
 	if (!vm)
 		return NULL;
 
@@ -176,7 +176,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 	return vm;
 
 err_out:
-	drm_free_large(vm);
+	kvfree(vm);
 	return NULL;
 }
 
@@ -216,7 +216,7 @@ void lima_vm_release(struct kref *kref)
 		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
 				  vm->pd.dma & ~LIMA_PAGE_MASK);
 
-	drm_free_large(vm);
+	kvfree(vm);
 }
 
 void lima_vm_print(struct lima_vm *vm)
