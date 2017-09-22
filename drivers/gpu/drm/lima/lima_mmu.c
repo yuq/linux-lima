@@ -53,6 +53,10 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 	struct lima_device *dev = mmu->ip.dev;
 	u32 status = mmu_read(INT_STATUS);
 
+	/* for shared irq case */
+	if (!status)
+		return IRQ_NONE;
+
 	if (status & LIMA_MMU_INT_PAGE_FAULT) {
 		u32 fault = mmu_read(PAGE_FAULT_ADDR);
 		dev_info(dev->dev, "mmu page fault at 0x%x from bus id %d of type %s on %s\n",
@@ -69,7 +73,7 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 	lima_sched_pipe_task_done(mmu->pipe, true);
 
 	mmu_write(INT_CLEAR, status);
-	return IRQ_NONE;
+	return IRQ_HANDLED;
 }
 
 int lima_mmu_init(struct lima_mmu *mmu)
