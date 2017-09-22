@@ -107,6 +107,10 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	struct lima_device *dev = gp->ip.dev;
 	u32 state = gp_read(INT_STAT);
 
+	/* for shared irq case */
+	if (!state)
+		return IRQ_NONE;
+
 	if (state & LIMA_GP_IRQ_MASK_ERROR) {
 		u32 status = gp_read(STATUS);
 		dev_info(dev->dev, "gp error irq state=%x status=%x\n",
@@ -131,7 +135,7 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	}
 
 	gp_write(INT_CLEAR, state);
-	return IRQ_NONE;
+	return IRQ_HANDLED;
 }
 
 static void lima_gp_soft_reset_async(struct lima_gp *gp)
