@@ -90,6 +90,10 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	struct lima_pp *pp = dev->pp;
 	u32 state = pp_read(INT_STATUS);
 
+	/* for shared irq case */
+	if (!state)
+		return IRQ_NONE;
+
 	if (state & LIMA_PP_IRQ_MASK_ERROR) {
 		u32 status = pp_read(STATUS);
 		dev_info(dev->dev, "pp error irq state=%x status=%x\n",
@@ -103,7 +107,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	}
 
 	pp_write(INT_CLEAR, state);
-	return IRQ_NONE;
+	return IRQ_HANDLED;
 }
 
 static void lima_pp_core_soft_reset_async(struct lima_pp_core *core)
