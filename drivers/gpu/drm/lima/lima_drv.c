@@ -1,5 +1,6 @@
 #include <linux/module.h>
 #include <linux/of_platform.h>
+#include <drm/drm_prime.h>
 
 #include "lima.h"
 
@@ -200,7 +201,7 @@ static const struct file_operations lima_drm_driver_fops = {
 };
 
 static struct drm_driver lima_drm_driver = {
-	.driver_features    = DRIVER_RENDER | DRIVER_GEM,
+	.driver_features    = DRIVER_RENDER | DRIVER_GEM | DRIVER_PRIME,
 	.open               = lima_drm_driver_open,
 	.postclose          = lima_drm_driver_postclose,
 	.ioctls             = lima_drm_driver_ioctls,
@@ -213,6 +214,10 @@ static struct drm_driver lima_drm_driver = {
 	.date               = "20170325",
 	.major              = 1,
 	.minor              = 0,
+
+	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+	.gem_prime_import   = drm_gem_prime_import,
+	.gem_prime_import_sg_table = lima_gem_prime_import_sg_table,
 };
 
 static int lima_pdev_probe(struct platform_device *pdev)

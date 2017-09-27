@@ -1,5 +1,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_gem.h>
+#include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/reservation.h>
 
@@ -19,7 +20,9 @@ struct lima_bo {
 	struct mutex lock;
 	struct list_head va;
 
-	struct reservation_object resv;
+	/* normally (resv == &_resv) except for imported bo's */
+	struct reservation_object *resv;
+	struct reservation_object _resv;
 };
 
 static inline
@@ -47,22 +50,14 @@ static struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 
 
 	mutex_init(&bo->lock);
 	INIT_LIST_HEAD(&bo->va);
-	reservation_object_init(&bo->resv);
+	reservation_object_init(&bo->_resv);
 
 	err = drm_gem_object_init(dev, &bo->gem, size);
 	if (err)
 		goto err_out0;
 
-	bo->cpu_addr = dma_alloc_coherent(dev->dev, size, &bo->dma_addr, GFP_USER);
-	if (!bo->cpu_addr) {
-		err = -ENOMEM;
-		goto err_out1;
-	}
-
 	return bo;
 
-err_out1:
-	drm_gem_object_release(&bo->gem);
 err_out0:
 	kfree(bo);
 	return ERR_PTR(err);
@@ -78,11 +73,23 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
+	bo->cpu_addr = dma_alloc_coherent(dev->dev, size, &bo->dma_addr, GFP_USER);
+	if (!bo->cpu_addr) {
+		err = -ENOMEM;
+		goto err_out;
+	}
+
+	bo->resv = &bo->_resv;
+
 	err = drm_gem_handle_create(file, &bo->gem, handle);
 
 	/* drop reference from allocate - handle holds it now */
 	drm_gem_object_unreference_unlocked(&bo->gem);
 
+	return err;
+
+err_out:
+	lima_gem_free_object(&bo->gem);
 	return err;
 }
 
@@ -97,8 +104,10 @@ void lima_gem_free_object(struct drm_gem_object *obj)
 		kfree(bo_va);
 	}
 
-	dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
-	reservation_object_fini(&bo->resv);
+	if (!obj->import_attach)
+		dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
+
+	reservation_object_fini(&bo->_resv);
 	drm_gem_object_release(obj);
 	kfree(bo);
 }
@@ -263,7 +272,7 @@ retry:
 			continue;
 		}
 
-		ret = ww_mutex_lock_interruptible(&bos[i]->resv.lock, ctx);
+		ret = ww_mutex_lock_interruptible(&bos[i]->resv->lock, ctx);
 		if (ret < 0) {
 			contended = i;
 			goto err;
@@ -275,14 +284,14 @@ retry:
 
 err:
 	for (i--; i >= 0; i--)
-		ww_mutex_unlock(&bos[i]->resv.lock);
+		ww_mutex_unlock(&bos[i]->resv->lock);
 
 	if (slow_locked >= 0)
-		ww_mutex_unlock(&bos[slow_locked]->resv.lock);
+		ww_mutex_unlock(&bos[slow_locked]->resv->lock);
 
 	if (ret == -EDEADLK) {
 		/* we lost out in a seqno race, lock and retry.. */
-		ret = ww_mutex_lock_slow_interruptible(&bos[contended]->resv.lock, ctx);
+		ret = ww_mutex_lock_slow_interruptible(&bos[contended]->resv->lock, ctx);
 		if (!ret) {
 			slow_locked = contended;
 			goto retry;
@@ -301,12 +310,12 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
 
 	if (write) {
 		struct reservation_object_list *fobj =
-			reservation_object_get_list(&bo->resv);
+			reservation_object_get_list(bo->resv);
 
 		if (fobj && fobj->shared_count > 0) {
 			for (i = 0; i < fobj->shared_count; i++) {
 				f = rcu_dereference_protected(
-					fobj->shared[i], reservation_object_held(&bo->resv));
+					fobj->shared[i], reservation_object_held(bo->resv));
 				if (f->context != context) {
 					err = lima_sched_task_add_dep(task, f);
 					if (err)
@@ -316,7 +325,7 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
 		}
 	}
 
-	f = reservation_object_get_excl(&bo->resv);
+	f = reservation_object_get_excl(bo->resv);
 	if (f) {
 		err = lima_sched_task_add_dep(task, f);
 		if (err)
@@ -324,7 +333,7 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
 	}
 
 	if (!write) {
-		err = reservation_object_reserve_shared(&bo->resv);
+		err = reservation_object_reserve_shared(bo->resv);
 		if (err)
 			return err;
 	}
@@ -380,9 +389,9 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 
 	for (i = 0; i < nr_bos; i++) {
 		if (bos[i].flags & LIMA_SUBMIT_BO_WRITE)
-			reservation_object_add_excl_fence(&lbos[i]->resv, task->fence);
+			reservation_object_add_excl_fence(lbos[i]->resv, task->fence);
 		else
-			reservation_object_add_shared_fence(&lbos[i]->resv, task->fence);
+			reservation_object_add_shared_fence(lbos[i]->resv, task->fence);
 	}
 	dma_fence_put(task->fence);
 
@@ -393,7 +402,7 @@ out2:
 		lima_sched_task_delete(task);
 out1:
 	for (i = 0; i < nr_bos; i++)
-		ww_mutex_unlock(&lbos[i]->resv.lock);
+		ww_mutex_unlock(&lbos[i]->resv->lock);
 	ww_acquire_fini(&ctx);
 out0:
 	for (i = 0; i < nr_bos && lbos[i]; i++)
@@ -417,7 +426,7 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
 	bo = to_lima_bo(obj);
 
 	timeout = timeout_ns ? lima_timeout_to_jiffies(timeout_ns) : 0;
-	ret = reservation_object_wait_timeout_rcu(&bo->resv, write, true, timeout);
+	ret = reservation_object_wait_timeout_rcu(bo->resv, write, true, timeout);
 	if (ret == 0)
 		ret = timeout ? -ETIMEDOUT : -EBUSY;
 	else if (ret > 0)
@@ -425,4 +434,21 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
 
 	drm_gem_object_unreference_unlocked(obj);
 	return ret;
+}
+
+struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
+						      struct dma_buf_attachment *attach,
+						      struct sg_table *sgt)
+{
+	struct lima_bo *bo;
+	dma_addr_t dma_addr = sg_dma_address(sgt->sgl);
+
+	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
+	if (!bo)
+		return ERR_PTR(-ENOMEM);
+
+	bo->dma_addr = dma_addr;
+	bo->resv = attach->dmabuf->resv;
+
+	return &bo->gem;
 }
