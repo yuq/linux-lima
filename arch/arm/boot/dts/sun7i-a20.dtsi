@@ -316,8 +316,8 @@
 					   <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>,
 					   <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>,
 					   <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "gp", "gpmmu", "pp0", "pp0mmu", "pmu",
-					  "pp1", "pp1mmu";
+			interrupt-names = "gp", "gpmmu", "pp0", "ppmmu0", "pmu",
+					  "pp1", "ppmmu1";
 			clocks = <&ccu CLK_AHB_GPU>, <&ccu CLK_GPU>;
 			clock-names = "bus", "core";
 			resets = <&ccu RST_GPU>;

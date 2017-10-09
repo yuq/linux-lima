@@ -91,8 +91,8 @@
 					   <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>,
 					   <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
 					   <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "gp", "gpmmu", "pp0", "pp0mmu", "pmu",
-					  "pp1", "pp1mmu";
+			interrupt-names = "gp", "gpmmu", "pp0", "ppmmu0", "pmu",
+					  "pp1", "ppmmu1";
 			clocks = <&ccu CLK_BUS_GPU>, <&ccu CLK_GPU>;
 			clock-names = "bus", "core";
 			resets = <&ccu RST_BUS_GPU>;
