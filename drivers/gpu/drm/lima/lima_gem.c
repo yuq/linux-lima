@@ -441,13 +441,13 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct sg_table *sgt)
 {
 	struct lima_bo *bo;
-	dma_addr_t dma_addr = sg_dma_address(sgt->sgl);
 
 	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
 	if (!bo)
 		return ERR_PTR(-ENOMEM);
 
-	bo->dma_addr = dma_addr;
+	bo->cpu_addr = sg_virt(sgt->sgl);
+	bo->dma_addr = sg_dma_address(sgt->sgl);
 	bo->resv = attach->dmabuf->resv;
 
 	return &bo->gem;
