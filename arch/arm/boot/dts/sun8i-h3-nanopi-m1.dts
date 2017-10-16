@@ -69,3 +69,19 @@
 	allwinner,leds-active-low;
 	status = "okay";
 };
+
+&de {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&mixer0 {
+	status = "okay";
+};
+
+&tcon0 {
+	status = "okay";
+};
