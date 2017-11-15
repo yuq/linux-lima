@@ -152,6 +152,7 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
 struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct dma_buf_attachment *attach,
 						      struct sg_table *sgt);
+struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj);
 
 unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
 
