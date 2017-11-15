@@ -452,3 +452,25 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 
 	return &bo->gem;
 }
+
+struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
+{
+	struct lima_bo *bo = to_lima_bo(obj);
+	struct sg_table *sgt;
+	int ret;
+
+	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return NULL;
+
+	ret = dma_get_sgtable(obj->dev->dev, sgt, bo->cpu_addr,
+			      bo->dma_addr, obj->size);
+	if (ret < 0)
+		goto out;
+
+	return sgt;
+
+out:
+	kfree(sgt);
+	return NULL;
+}
