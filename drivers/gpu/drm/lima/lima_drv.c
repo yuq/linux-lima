@@ -218,6 +218,9 @@ static struct drm_driver lima_drm_driver = {
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_import   = drm_gem_prime_import,
 	.gem_prime_import_sg_table = lima_gem_prime_import_sg_table,
+	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
+	.gem_prime_export   = drm_gem_prime_export,
+	.gem_prime_get_sg_table = lima_gem_prime_get_sg_table,
 };
 
 static int lima_pdev_probe(struct platform_device *pdev)
