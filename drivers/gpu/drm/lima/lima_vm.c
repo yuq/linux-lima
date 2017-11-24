@@ -148,7 +148,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 		return NULL;
 
 	vm->dev = dev;
-	vm->va = RB_ROOT;
+	vm->va = RB_ROOT_CACHED;
 	mutex_init(&vm->lock);
 	kref_init(&vm->refcount);
 
@@ -178,8 +178,9 @@ void lima_vm_release(struct kref *kref)
 		}
 	}
 
-	if (!RB_EMPTY_ROOT(&vm->va))
+	if (!RB_EMPTY_ROOT(&vm->va.rb_root)) {
 		dev_err(vm->dev->dev, "still active bo inside vm\n");
+	}
 
 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
 		if (vm->pts[i].cpu) {
