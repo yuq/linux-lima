@@ -44,7 +44,7 @@ struct lima_vm {
 	struct lima_device *dev;
 
 	/* tree of virtual addresses mapped */
-	struct rb_root va;
+	struct rb_root_cached va;
 
         struct lima_vm_page pd;
 	struct lima_vm_page pts[LIMA_PAGE_ENT_NUM];
