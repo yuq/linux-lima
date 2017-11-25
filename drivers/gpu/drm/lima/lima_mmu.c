@@ -126,8 +126,15 @@ void lima_mmu_switch_vm(struct lima_mmu *mmu, struct lima_vm *vm, bool reset)
 	if (mmu->vm == vm) {
 		if (reset)
 			vm = dev->empty_vm;
-		else if (!mmu->zap_all)
+		else {
+			/* TODO: mmu->zap_all was designed here when active VM is
+			 * updated, zap the MMU TLB. But seems we need always do zap
+			 * (without stall) before start task with the same VM. So
+			 * the MMU TLB can't keep across tasks with the same VM?
+			 */
+			mmu_write(COMMAND, LIMA_MMU_COMMAND_ZAP_CACHE);
 			goto out;
+		}
 	}
 
 	lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_STALL,
