@@ -149,15 +149,12 @@ static int lima_pp_core_soft_reset_async_wait(struct lima_pp_core *core)
 static void lima_pp_core_start_task(struct lima_pp_core *core, int index,
 				    struct lima_sched_task *task)
 {
-	struct lima_device *dev = core->ip.dev;
 	struct drm_lima_m400_pp_frame *frame = task->frame;
 	u32 *frame_reg = (void *)&frame->frame;
 	const int num_frame_reg = 23, num_wb_reg = 12;
 	int i, j;
 
 	lima_pp_core_soft_reset_async_wait(core);
-
-	dev_info(dev->dev, "lima start task pp %s %08x\n", core->ip.name, pp_read(STATUS));
 
 	frame->frame.plbu_array_address = frame->plbu_array_address[index];
 	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];

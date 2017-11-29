@@ -203,8 +203,6 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 	/* before any hw ops, wait last success task async soft reset */
 	lima_gp_soft_reset_async_wait(gp);
 
-	dev_info(dev->dev, "lima start task gp status %08x\n", gp_read(STATUS));
-
 	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
 	gp_write(VSCL_END_ADDR, frame->vs_cmd_end);
 	gp_write(PLBUCL_START_ADDR, frame->plbu_cmd_start);
