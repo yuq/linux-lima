@@ -243,7 +243,12 @@ static int lima_sched_pipe_worker(void *param)
 		 * 3. can we reduce the calling of this function because all
 		 *    GP/PP use the same L2 cache
 		 */
-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
+		if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
+			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
+			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
+		} else {
+			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
+		}
 
 		for (i = 0; i < pipe->num_mmu; i++)
 			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
