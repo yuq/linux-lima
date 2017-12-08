@@ -8,8 +8,21 @@
 #define LIMA_L2_BASE           0x1000
 #define LIMA_PMU_BASE          0x2000
 #define LIMA_GPMMU_BASE        0x3000
-#define LIMA_PPMMU_BASE(i)     (0x4000 + 0x1000 * (i))
-#define LIMA_PP_BASE(i)        (0x8000 + 0x2000 * (i))
+#define LIMA_PPMMU_BASE(i)     ((i < 4) ? 0x4000 + 0x1000 * (i) : \
+					  0x1C000 + 0x1000 * (i - 4))
+#define LIMA_PP_BASE(i)        ((i < 4) ? 0x8000 + 0x2000 * (i) : \
+					  0x28000 + 0x2000 * (i - 4))
+
+/* Separate L2-caches per group on Mali450 */
+#define LIMA450_GPL2_BASE      0x10000
+#define LIMA450_PP03L2_BASE    0x01000
+#define LIMA450_PP47L2_BASE    0x11000
+
+#define LIMA_BCAST_BASE        0x13000
+#define LIMA_PPBCAST_BASE      0x16000
+#define LIMA_PPBCASTMMU_BASE   0x15000
+#define LIMA_DLBU_BASE         0x14000
+#define LIMA_DMA_BASE          0x12000
 
 static int lima_clk_init(struct lima_device *dev)
 {
