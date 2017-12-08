@@ -106,27 +106,46 @@ static int lima_gp_group_init(struct lima_device *dev)
 	if (!gp)
 		return -ENOMEM;
 
+	/* Init GP-group L2 cache on Mali450 */
+	if (dev->gpu_type == GPU_MALI450) {
+		gp->l2_cache = kzalloc(sizeof(*gp->l2_cache), GFP_KERNEL);
+		if (!gp->l2_cache) {
+			err = -ENOMEM;
+			goto err_out0;
+		}
+		gp->l2_cache->ip.irq = -1;
+		if ((err = lima_init_ip(dev, "gp-l2-cache", &gp->l2_cache->ip, LIMA450_GPL2_BASE)) ||
+		    (err = lima_l2_cache_init(gp->l2_cache))) {
+			goto err_out1;
+		}
+	}
+
 	if ((err = lima_init_ip(dev, "gpmmu", &gp->mmu.ip, LIMA_GPMMU_BASE)) ||
 	    (err = lima_mmu_init(&gp->mmu)))
-		goto err_out0;
+		goto err_out1;
 
 	if ((err = lima_init_ip(dev, "gp", &gp->ip, LIMA_GP_BASE)) ||
 	    (err = lima_gp_init(gp)))
-		goto err_out1;
+		goto err_out2;
 
 	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
-		goto err_out2;
+		goto err_out3;
 
 	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
 	gp->mmu.pipe = &gp->pipe;
 	dev->gp = gp;
 	return 0;
 
-err_out2:
+err_out3:
 	lima_gp_fini(gp);
-err_out1:
+err_out2:
 	lima_mmu_fini(&gp->mmu);
+err_out1:
+	if (gp->l2_cache)
+		lima_l2_cache_fini(gp->l2_cache);
 err_out0:
+	if (gp->l2_cache)
+		kfree(gp->l2_cache);
 	kfree(gp);
 	return err;
 }
@@ -141,6 +160,17 @@ static int lima_pp_group_init(struct lima_device *dev)
 	if (!pp)
 		return -ENOMEM;
 	dev->pp = pp;
+
+	/* Init PP-group L2 cache on Mali450 */
+	if (dev->gpu_type == GPU_MALI450) {
+		pp->l2_cache = kzalloc(sizeof(*pp->l2_cache), GFP_KERNEL);
+		if (!pp->l2_cache)
+			return -ENOMEM;
+		pp->l2_cache->ip.irq = -1;
+		if ((err = lima_init_ip(dev, "pp-l2-cache", &pp->l2_cache->ip, LIMA450_PP03L2_BASE)) ||
+		    (err = lima_l2_cache_init(pp->l2_cache)))
+			return err;
+	}
 
 	for (i = 0; i < dev->num_pp; i++) {
 		struct lima_pp_core *core = pp->core + pp->num_core;
@@ -233,17 +263,19 @@ int lima_device_init(struct lima_device *ldev)
 		ldev->pmu = NULL;
 	}
 
-	ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
-	if (!ldev->l2_cache) {
-		err = -ENOMEM;
-		goto err_out;
-	}
-	ldev->l2_cache->ip.irq = -1;
-	if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
-	    (err = lima_l2_cache_init(ldev->l2_cache))) {
-		kfree(ldev->l2_cache);
-		ldev->l2_cache = NULL;
-		goto err_out;
+	if (ldev->gpu_type != GPU_MALI450) {
+		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
+		if (!ldev->l2_cache) {
+			err = -ENOMEM;
+			goto err_out;
+		}
+		ldev->l2_cache->ip.irq = -1;
+		if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
+		    (err = lima_l2_cache_init(ldev->l2_cache))) {
+			kfree(ldev->l2_cache);
+			ldev->l2_cache = NULL;
+			goto err_out;
+		}
 	}
 
 	if ((err = lima_gp_group_init(ldev)))
@@ -273,12 +305,24 @@ void lima_device_fini(struct lima_device *ldev)
 			lima_pp_core_fini(ldev->pp->core + i);
 			lima_mmu_fini(&ldev->pp->core[i].mmu);
 		}
+
+		if (ldev->pp->l2_cache) {
+			lima_l2_cache_fini(ldev->pp->l2_cache);
+			kfree(ldev->pp->l2_cache);
+		}
+
 		kfree(ldev->pp);
 	}
 
 	if (ldev->gp) {
 		lima_gp_fini(ldev->gp);
 		lima_mmu_fini(&ldev->gp->mmu);
+
+		if (ldev->gp->l2_cache) {
+			lima_l2_cache_fini(ldev->gp->l2_cache);
+			kfree(ldev->gp->l2_cache);
+		}
+
 		kfree(ldev->gp);
 	}
 
