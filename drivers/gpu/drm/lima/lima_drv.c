@@ -235,6 +235,7 @@ static int lima_pdev_probe(struct platform_device *pdev)
 
 	ldev->pdev = pdev;
 	ldev->dev = &pdev->dev;
+	ldev->gpu_type = (enum lima_gpu_type)of_device_get_match_data(&pdev->dev);
 
 	platform_set_drvdata(pdev, ldev);
 
@@ -281,7 +282,7 @@ static int lima_pdev_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id dt_match[] = {
-	{ .compatible = "arm,mali-400" },
+	{ .compatible = "arm,mali-400", .data = (void *)GPU_MALI400 },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);
