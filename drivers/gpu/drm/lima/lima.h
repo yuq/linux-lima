@@ -29,6 +29,7 @@
 
 enum lima_gpu_type {
 	GPU_MALI400 = 0,
+	GPU_MALI450,
 };
 
 struct lima_device;
@@ -66,6 +67,7 @@ struct lima_gp {
 	struct lima_ip ip;
 	struct lima_mmu mmu;
 	struct lima_sched_pipe pipe;
+	struct lima_l2_cache *l2_cache;
 
 	int task;
 	bool async_reset;
@@ -83,6 +85,7 @@ struct lima_pp {
 	struct lima_pp_core core[LIMA_MAX_PP];
 	int num_core;
 	struct lima_sched_pipe pipe;
+	struct lima_l2_cache *l2_cache;
 	atomic_t task;
 };
 
