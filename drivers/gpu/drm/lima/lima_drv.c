@@ -19,6 +19,9 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
 	case GPU_MALI400:
 		info->gpu_id = LIMA_INFO_GPU_MALI400;
 		break;
+	case GPU_MALI450:
+		info->gpu_id = LIMA_INFO_GPU_MALI450;
+		break;
 	default:
 		return -ENODEV;
 	}
@@ -70,6 +73,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 
 	switch (ldev->gpu_type) {
 	case GPU_MALI400:
+	case GPU_MALI450:
 		if (args->pipe == LIMA_PIPE_GP) {
 			if (args->frame_size != sizeof(struct drm_lima_m400_gp_frame))
 				return -EINVAL;
@@ -103,6 +107,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 
 	switch (ldev->gpu_type) {
 	case GPU_MALI400:
+	case GPU_MALI450:
 		if (args->pipe == LIMA_PIPE_PP) {
 			struct drm_lima_m400_pp_frame *f = frame;
 			if (f->num_pp > ldev->pp->num_core) {
@@ -283,6 +288,7 @@ static int lima_pdev_remove(struct platform_device *pdev)
 
 static const struct of_device_id dt_match[] = {
 	{ .compatible = "arm,mali-400", .data = (void *)GPU_MALI400 },
+	{ .compatible = "arm,mali-450", .data = (void *)GPU_MALI450 },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);
