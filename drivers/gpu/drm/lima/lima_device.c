@@ -174,8 +174,6 @@ int lima_device_init(struct lima_device *ldev)
 
 	dma_set_coherent_mask(ldev->dev, DMA_BIT_MASK(32));
 
-	ldev->gpu_type = GPU_MALI400;
-
 	np = ldev->dev->of_node;
 
 	err = lima_clk_init(ldev);
