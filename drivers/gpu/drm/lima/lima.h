@@ -100,6 +100,7 @@ struct lima_device {
 	struct clk *clk_bus;
 	struct clk *clk_gpu;
 	struct reset_control *reset;
+	struct regulator *regulator;
 
 	struct lima_pmu *pmu;
 

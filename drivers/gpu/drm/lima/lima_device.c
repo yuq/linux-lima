@@ -1,3 +1,4 @@
+#include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
@@ -77,6 +78,35 @@ static void lima_clk_fini(struct lima_device *dev)
 	clk_disable_unprepare(dev->clk_gpu);
 	clk_disable_unprepare(dev->clk_bus);
 }
+
+static int lima_regulator_init(struct lima_device *dev)
+{
+	int ret;
+	dev->regulator = devm_regulator_get_optional(dev->dev, "mali");
+	if (IS_ERR(dev->regulator)) {
+		ret = PTR_ERR(dev->regulator);
+		dev->regulator = NULL;
+		if (ret == -ENODEV)
+			return 0;
+		dev_err(dev->dev, "failed to get regulator: %ld\n", PTR_ERR(dev->regulator));
+		return ret;
+	}
+
+	ret = regulator_enable(dev->regulator);
+	if (ret < 0) {
+		dev_err(dev->dev, "failed to enable regulator: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void lima_regulator_fini(struct lima_device *dev)
+{
+	if (dev->regulator)
+		regulator_disable(dev->regulator);
+}
+
 
 static int lima_init_ip(struct lima_device *dev, const char *name,
 			struct lima_ip *ip, u32 offset)
@@ -226,6 +256,10 @@ int lima_device_init(struct lima_device *ldev)
 		return err;
 	}
 
+	if ((err = lima_regulator_init(ldev))) {
+		return err;
+	}
+
 	ldev->empty_vm = lima_vm_create(ldev);
 	if (!ldev->empty_vm) {
 		err = -ENOMEM;
@@ -338,6 +372,8 @@ void lima_device_fini(struct lima_device *ldev)
 	}
 
 	lima_vm_put(ldev->empty_vm);
+
+	lima_regulator_fini(ldev);
 
 	lima_clk_fini(ldev);
 }
