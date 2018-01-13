@@ -52,14 +52,14 @@ static int lima_clk_init(struct lima_device *dev)
 	if ((err = clk_prepare_enable(dev->clk_gpu)))
 		goto error_out0;
 
-	dev->reset = devm_reset_control_get(dev->dev, NULL);
+	dev->reset = devm_reset_control_get_optional(dev->dev, NULL);
 	if (IS_ERR(dev->reset)) {
 		err = PTR_ERR(dev->reset);
 		goto error_out1;
+	} else if (dev->reset != NULL) {
+		if ((err = reset_control_deassert(dev->reset)))
+			goto error_out1;
 	}
-
-	if ((err = reset_control_deassert(dev->reset)))
-		goto error_out1;
 
 	return 0;
 
@@ -72,7 +72,8 @@ error_out0:
 
 static void lima_clk_fini(struct lima_device *dev)
 {
-	reset_control_assert(dev->reset);
+	if (dev->reset != NULL)
+		reset_control_assert(dev->reset);
 	clk_disable_unprepare(dev->clk_gpu);
 	clk_disable_unprepare(dev->clk_bus);
 }
