@@ -149,6 +149,10 @@ config DRM_VM
 	bool
 	depends on DRM && MMU
 
+config DRM_SCHED
+	tristate
+	depends on DRM
+
 source "drivers/gpu/drm/i2c/Kconfig"
 
 source "drivers/gpu/drm/arm/Kconfig"
