@@ -453,6 +453,13 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 	return &bo->gem;
 }
 
+struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj)
+{
+        struct lima_bo *bo = to_lima_bo(obj);
+
+	return bo->resv;
+}
+
 struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
 	struct lima_bo *bo = to_lima_bo(obj);

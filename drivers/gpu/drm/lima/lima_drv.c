@@ -225,6 +225,7 @@ static struct drm_driver lima_drm_driver = {
 	.gem_prime_import_sg_table = lima_gem_prime_import_sg_table,
 	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
 	.gem_prime_export   = drm_gem_prime_export,
+	.gem_prime_res_obj  = lima_gem_prime_res_obj,
 	.gem_prime_get_sg_table = lima_gem_prime_get_sg_table,
 };
 
