@@ -21,6 +21,8 @@
  */
 #ifndef __LIMA_H__
 
+#include <linux/rbtree.h>
+
 #include <drm/drmP.h>
 #include <drm/lima_drm.h>
 
@@ -119,6 +121,14 @@ struct lima_drm_priv {
 	struct lima_vm *vm;
 };
 
+struct lima_bo_va_mapping {
+	struct list_head list;
+	struct rb_node rb;
+	uint32_t start;
+	uint32_t last;
+	uint32_t __subtree_last;
+};
+
 int lima_device_init(struct lima_device *ldev);
 void lima_device_fini(struct lima_device *ldev);
 
@@ -145,6 +155,8 @@ void lima_pp_init(struct lima_pp *pp);
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 			   u32 size, u32 flags, u32 *handle);
 void lima_gem_free_object(struct drm_gem_object *obj);
+int lima_gem_object_open(struct drm_gem_object *obj, struct drm_file *file);
+void lima_gem_object_close(struct drm_gem_object *obj, struct drm_file *file);
 int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
 int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
