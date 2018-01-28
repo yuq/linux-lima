@@ -1,6 +1,6 @@
 #include <linux/slab.h>
-#include <linux/interval_tree.h>
 #include <linux/dma-mapping.h>
+#include <linux/interval_tree_generic.h>
 
 #include "lima.h"
 
@@ -33,6 +33,14 @@
 		LIMA_VM_FLAG_READ_PERMISSION |	\
 		LIMA_VM_FLAG_WRITE_PERMISSION )
 
+#define START(node) ((node)->start)
+#define LAST(node) ((node)->last)
+
+INTERVAL_TREE_DEFINE(struct lima_bo_va_mapping, rb, uint32_t, __subtree_last,
+		     START, LAST, static, lima_vm_it)
+
+#undef START
+#undef LAST
 
 static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
 {
@@ -55,33 +63,26 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
 	}
 }
 
-int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
+int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *mapping)
 {
 	int err;
-	struct interval_tree_node *it;
+	struct lima_bo_va_mapping *it;
 	u32 addr;
 
 	mutex_lock(&vm->lock);
 
-	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
+	it = lima_vm_it_iter_first(&vm->va, mapping->start, mapping->last);
 	if (it) {
-		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %lx-%lx\n",
-			va, va + size -1, it->start, it->last);
+		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
+			mapping->start, mapping->last, it->start, it->last);
 		err = -EINVAL;
 		goto err_out0;
 	}
 
-	it = kmalloc(sizeof(*it), GFP_KERNEL);
-	if (!it) {
-		err = -ENOMEM;
-		goto err_out0;
-	}
+	lima_vm_it_insert(mapping, &vm->va);
 
-	it->start = va;
-	it->last = va + size - 1;
-	interval_tree_insert(it, &vm->va);
-
-	for (addr = va; addr < va + size; addr += LIMA_PAGE_SIZE, dma += LIMA_PAGE_SIZE) {
+	for (addr = mapping->start; addr <= mapping->last;
+	     addr += LIMA_PAGE_SIZE, dma += LIMA_PAGE_SIZE) {
 		u32 pde = LIMA_PDE(addr);
 		u32 pte = LIMA_PTE(addr);
 
@@ -109,50 +110,33 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, u32 va, u32 size)
 	return 0;
 
 err_out1:
-	lima_vm_unmap_page_table(vm, va, addr);
-	interval_tree_remove(it, &vm->va);
-	kfree(it);
+	lima_vm_unmap_page_table(vm, mapping->start, addr);
+	lima_vm_it_remove(mapping, &vm->va);
 err_out0:
 	mutex_unlock(&vm->lock);
 	return err;
 }
 
-int lima_vm_unmap(struct lima_vm *vm, u32 va, u32 size)
+int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
 {
-	int err, i, j;
-	struct interval_tree_node *it;
+	int i, j;
 	struct lima_device *dev = vm->dev;
 
 	mutex_lock(&vm->lock);
 
-	it = interval_tree_iter_first(&vm->va, va, va + size - 1);
-	if (it) {
-		if (it->start != va || it->last != va + size - 1) {
-			dev_err(dev->dev, "lima vm unmap va not match %x-%x %lx-%lx\n",
-				va, va + size -1, it->start, it->last);
-			err = -EINVAL;
-			goto err_out;
-		}
-		interval_tree_remove(it, &vm->va);
-		kfree(it);
-	}
-	else
-		goto err_out;
+	lima_vm_it_remove(mapping, &vm->va);
 
-	lima_vm_unmap_page_table(vm, va, va + size);
+	lima_vm_unmap_page_table(vm, mapping->start, mapping->last + 1);
 
 	mutex_unlock(&vm->lock);
 
 	for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
 		for (j = 0; j < dev->pipe[i]->num_mmu; j++)
-			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, va, size);
+			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, mapping->start,
+					mapping->last + 1 - mapping->start);
 	}
 
 	return 0;
-
-err_out:
-	mutex_unlock(&vm->lock);
-	return err;
 }
 
 struct lima_vm *lima_vm_create(struct lima_device *dev)
@@ -183,7 +167,6 @@ err_out:
 void lima_vm_release(struct kref *kref)
 {
 	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
-	struct interval_tree_node *it, *tmp;
 	struct lima_device *dev = vm->dev;
 	int i, j;
 
@@ -195,14 +178,8 @@ void lima_vm_release(struct kref *kref)
 		}
 	}
 
-	if (!RB_EMPTY_ROOT(&vm->va)) {
+	if (!RB_EMPTY_ROOT(&vm->va))
 		dev_err(vm->dev->dev, "still active bo inside vm\n");
-	}
-
-	rbtree_postorder_for_each_entry_safe(it, tmp, &vm->va, rb) {
-		interval_tree_remove(it, &vm->va);
-		kfree(it);
-	}
 
 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
 		if (vm->pts[i].cpu) {
@@ -222,6 +199,9 @@ void lima_vm_release(struct kref *kref)
 void lima_vm_print(struct lima_vm *vm)
 {
 	int i, j;
+
+	/* to avoid the defined by not used warning */
+	(void)&lima_vm_it_iter_next;
 
 	if (!vm->pd.cpu)
 		return;

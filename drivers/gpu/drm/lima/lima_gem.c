@@ -8,8 +8,11 @@
 
 struct lima_bo_va {
 	struct list_head list;
+	unsigned ref_count;
+
+	struct list_head mapping;
+
 	struct lima_vm *vm;
-	u32 va;
 };
 
 struct lima_bo {
@@ -96,13 +99,9 @@ err_out:
 void lima_gem_free_object(struct drm_gem_object *obj)
 {
 	struct lima_bo *bo = to_lima_bo(obj);
-	struct lima_bo_va *bo_va, *tmp;
 
-	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
-		lima_vm_unmap(bo_va->vm, bo_va->va, obj->size);
-		list_del(&bo_va->list);
-		kfree(bo_va);
-	}
+	if (!list_empty(&bo->va))
+		dev_err(obj->dev->dev, "lima gem free bo still has va\n");
 
 	if (!obj->import_attach)
 		dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
@@ -110,6 +109,77 @@ void lima_gem_free_object(struct drm_gem_object *obj)
 	reservation_object_fini(&bo->_resv);
 	drm_gem_object_release(obj);
 	kfree(bo);
+}
+
+static struct lima_bo_va *lima_gem_find_bo_va(struct lima_bo *bo, struct lima_vm *vm)
+{
+	struct lima_bo_va *bo_va, *ret = NULL;
+
+	list_for_each_entry(bo_va, &bo->va, list) {
+		if (bo_va->vm == vm) {
+			ret = bo_va;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+int lima_gem_object_open(struct drm_gem_object *obj, struct drm_file *file)
+{
+	struct lima_bo *bo = to_lima_bo(obj);
+	struct lima_drm_priv *priv = to_lima_drm_priv(file);
+	struct lima_vm *vm = priv->vm;
+	struct lima_bo_va *bo_va;
+	int err = 0;
+
+	mutex_lock(&bo->lock);
+
+	bo_va = lima_gem_find_bo_va(bo, vm);
+	if (bo_va)
+		bo_va->ref_count++;
+	else {
+		bo_va = kmalloc(sizeof(*bo_va), GFP_KERNEL);
+		if (!bo_va) {
+			err = -ENOMEM;
+			goto out;
+		}
+
+		bo_va->vm = vm;
+		bo_va->ref_count = 1;
+		INIT_LIST_HEAD(&bo_va->mapping);
+		list_add_tail(&bo_va->list, &bo->va);
+	}
+
+out:
+	mutex_unlock(&bo->lock);
+	return err;
+}
+
+void lima_gem_object_close(struct drm_gem_object *obj, struct drm_file *file)
+{
+	struct lima_bo *bo = to_lima_bo(obj);
+	struct lima_drm_priv *priv = to_lima_drm_priv(file);
+	struct lima_vm *vm = priv->vm;
+	struct lima_bo_va *bo_va;
+
+	mutex_lock(&bo->lock);
+
+	bo_va = lima_gem_find_bo_va(bo, vm);
+	BUG_ON(!bo_va);
+
+	if (--bo_va->ref_count == 0) {
+		struct lima_bo_va_mapping *mapping, *tmp;
+		list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
+			lima_vm_unmap(vm, mapping);
+			list_del(&mapping->list);
+			kfree(mapping);
+		}
+		list_del(&bo_va->list);
+		kfree(bo_va);
+	}
+
+	mutex_unlock(&bo->lock);
 }
 
 int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset)
@@ -169,10 +239,12 @@ const struct vm_operations_struct lima_gem_vm_ops = {
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 {
 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
+	struct lima_vm *vm = priv->vm;
 	struct drm_gem_object *obj;
 	struct lima_bo *bo;
-	int err;
 	struct lima_bo_va *bo_va;
+	struct lima_bo_va_mapping *mapping;
+	int err;
 
 	if (!PAGE_ALIGNED(va))
 		return -EINVAL;
@@ -189,22 +261,27 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 		goto err_out0;
 	}
 
-	err = lima_vm_map(priv->vm, bo->dma_addr, va, obj->size);
-	if (err)
-		goto err_out0;
-
-	bo_va = kmalloc(sizeof(*bo_va), GFP_KERNEL);
-	if (!bo_va) {
+	mapping = kmalloc(sizeof(*mapping), GFP_KERNEL);
+	if (!mapping) {
 		err = -ENOMEM;
-		goto err_out1;
+		goto err_out0;
 	}
-	INIT_LIST_HEAD(&bo_va->list);
-	bo_va->vm = priv->vm;
-	bo_va->va = va;
+
+	mapping->start = va;
+	mapping->last = va + obj->size - 1;
 
 	mutex_lock(&bo->lock);
 
-	list_add(&bo_va->list, &bo->va);
+	bo_va = lima_gem_find_bo_va(bo, vm);
+	BUG_ON(!bo_va);
+
+	err = lima_vm_map(vm, bo->dma_addr, mapping);
+	if (err) {
+		mutex_unlock(&bo->lock);
+		goto err_out1;
+	}
+
+	list_add_tail(&mapping->list, &bo_va->mapping);
 
 	mutex_unlock(&bo->lock);
 
@@ -212,7 +289,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 	return 0;
 
 err_out1:
-	lima_vm_unmap(priv->vm, va, obj->size);
+	kfree(mapping);
 err_out0:
 	drm_gem_object_unreference_unlocked(obj);
 	return err;
@@ -221,11 +298,11 @@ err_out0:
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
 {
 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
+	struct lima_vm *vm = priv->vm;
 	struct drm_gem_object *obj;
 	struct lima_bo *bo;
-	int err = 0;
-	struct lima_bo_va *bo_va, *tmp;
-	bool found = false;
+	struct lima_bo_va *bo_va;
+	struct lima_bo_va_mapping *mapping;
 
 	obj = drm_gem_object_lookup(file, handle);
 	if (!obj)
@@ -235,27 +312,22 @@ int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va)
 
 	mutex_lock(&bo->lock);
 
-	list_for_each_entry_safe(bo_va, tmp, &bo->va, list) {
-		if (bo_va->vm == priv->vm && bo_va->va == va) {
-			list_del(&bo_va->list);
-			kfree(bo_va);
-			found = true;
+	bo_va = lima_gem_find_bo_va(bo, vm);
+	BUG_ON(!bo_va);
+
+	list_for_each_entry(mapping, &bo_va->mapping, list) {
+		if (mapping->start == va) {
+			lima_vm_unmap(vm, mapping);
+			list_del(&mapping->list);
+			kfree(mapping);
 			break;
 		}
 	}
 
 	mutex_unlock(&bo->lock);
 
-	if (!found) {
-		err = -ENOENT;
-		goto out;
-	}
-
-	err = lima_vm_unmap(priv->vm, va, obj->size);
-
-out:
 	drm_gem_object_unreference_unlocked(obj);
-	return err;
+	return 0;
 }
 
 static int lima_gem_lock_bos(struct lima_bo **bos, u32 nr_bos,
