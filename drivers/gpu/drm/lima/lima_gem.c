@@ -374,11 +374,11 @@ err:
 	return ret;
 }
 
-static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
-			    struct lima_bo *bo, bool write)
+static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bool write)
 {
 	int i, err;
 	struct dma_fence *f;
+	u64 context = task->base.s_fence->finished.context;
 
 	if (write) {
 		struct reservation_object_list *fobj =
@@ -413,9 +413,9 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, u64 context,
 	return 0;
 }
 
-int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
-		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
-		    void *frame, u32 *fence)
+int lima_gem_submit(struct drm_file *file, int pipe,
+		    struct drm_lima_gem_submit_bo *bos,
+		    u32 nr_bos, void *frame, u32 *fence)
 {
 	struct lima_bo **lbos;
 	int i, err = 0;
@@ -442,32 +442,28 @@ int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
 	if (err)
 		goto out0;
 
-	task = lima_sched_task_create(priv->vm, frame);
+	task = lima_sched_task_create(priv->context + pipe, priv->vm, frame);
 	if (IS_ERR(task)) {
 		err = PTR_ERR(task);
 		goto out1;
 	}
 
 	for (i = 0; i < nr_bos; i++) {
-		err = lima_gem_sync_bo(task, pipe->fence_context, lbos[i],
-				       bos[i].flags & LIMA_SUBMIT_BO_WRITE);
+		err = lima_gem_sync_bo(task, lbos[i], bos[i].flags & LIMA_SUBMIT_BO_WRITE);
 		if (err)
 			goto out2;
 	}
 
-	err = lima_sched_task_queue(pipe, task);
-	if (err)
-		goto out2;
-
 	for (i = 0; i < nr_bos; i++) {
 		if (bos[i].flags & LIMA_SUBMIT_BO_WRITE)
-			reservation_object_add_excl_fence(lbos[i]->resv, task->fence);
+			reservation_object_add_excl_fence(
+				lbos[i]->resv, &task->base.s_fence->finished);
 		else
-			reservation_object_add_shared_fence(lbos[i]->resv, task->fence);
+			reservation_object_add_shared_fence(
+				lbos[i]->resv, &task->base.s_fence->finished);
 	}
-	dma_fence_put(task->fence);
 
-	*fence = task->fence->seqno;
+	*fence = lima_sched_context_queue_task(priv->context + pipe, task);
 
 out2:
 	if (err)

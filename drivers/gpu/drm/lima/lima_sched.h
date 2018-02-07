@@ -22,11 +22,11 @@
 #ifndef __LIMA_SCHED_H__
 #define __LIMA_SCHED_H__
 
-#include <linux/list.h>
-#include <linux/wait.h>
+#include <drm/gpu_scheduler.h>
 
 struct lima_sched_task {
-	struct list_head list;
+	struct drm_sched_job base;
+
 	struct lima_vm *vm;
 	void *frame;
 
@@ -34,43 +34,53 @@ struct lima_sched_task {
 	int num_dep;
 	int max_dep;
 
+	/* pipe fence */
 	struct dma_fence *fence;
+};
+
+#define LIMA_SCHED_CONTEXT_MAX_TASK 32
+struct lima_sched_context {
+	struct drm_sched_entity base;
+	spinlock_t lock;
+	struct dma_fence *fences[LIMA_SCHED_CONTEXT_MAX_TASK];
+	uint32_t sequence;
+	atomic_t guilty;
 };
 
 #define LIMA_SCHED_PIPE_MAX_MMU 4
 struct lima_sched_pipe {
-	const char *name;
+	struct drm_gpu_scheduler base;
 
 	u64 fence_context;
+	u32 fence_seqno;
 	spinlock_t fence_lock;
+
+	struct lima_sched_task *current_task;
+
 	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
 	int num_mmu;
-
-	struct task_struct *worker;
-	wait_queue_head_t worker_idle_wait;
-	wait_queue_head_t worker_busy_wait;
-	bool worker_is_busy;
-	bool worker_has_error;
-
-	spinlock_t lock;
-	struct list_head queue;
-	u32 fence_seqno;
-
-	u32 fence_done_seqno;
 
 	int (*start_task)(void *data, struct lima_sched_task *task);
 	int (*end_task)(void *data, bool fail);
 	void *data;
 };
 
-struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame);
+struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,
+					       struct lima_vm *vm, void *frame);
 void lima_sched_task_delete(struct lima_sched_task *task);
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
-int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
+
+int lima_sched_context_init(struct lima_sched_pipe *pipe,
+			    struct lima_sched_context *context);
+void lima_sched_context_fini(struct lima_sched_pipe *pipe,
+			     struct lima_sched_context *context);
+uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
+				       struct lima_sched_task *task);
+int lima_sched_context_wait_fence(struct lima_sched_context *context,
+				  u32 fence, u64 timeout_ns);
 
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
-int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns);
 void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error);
 
 #endif
