@@ -21,7 +21,7 @@ static const char *lima_fence_get_timeline_name(struct dma_fence *fence)
 {
 	struct lima_fence *f = to_lima_fence(fence);
 
-	return f->pipe->name;
+	return f->pipe->base.name;
 }
 
 static bool lima_fence_enable_signaling(struct dma_fence *fence)
@@ -44,16 +44,43 @@ static const struct dma_fence_ops lima_fence_ops = {
 	.release = lima_fence_release,
 };
 
-struct lima_sched_task *lima_sched_task_create(struct lima_vm *vm, void *frame)
+static inline struct lima_sched_task *to_lima_task(struct drm_sched_job *job)
+{
+	return container_of(job, struct lima_sched_task, base);
+}
+
+static inline struct lima_sched_pipe *to_lima_pipe(struct drm_gpu_scheduler *sched)
+{
+	return container_of(sched, struct lima_sched_pipe, base);
+}
+
+struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,
+					       struct lima_vm *vm, void *frame)
 {
 	struct lima_sched_task *task;
+	struct lima_fence *fence;
+	int err;
 
 	task = kzalloc(sizeof(*task), GFP_KERNEL);
 	if (!task)
 		return ERR_PTR(-ENOMEM);
 
+	err = drm_sched_job_init(&task->base, context->base.sched,
+				 &context->base, context);
+	if (err) {
+		kfree(task);
+		return ERR_PTR(err);
+	}
+
+	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+	if (!fence) {
+		kfree(task);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	task->vm = lima_vm_get(vm);
 	task->frame = frame;
+	task->fence = &fence->base;
 
 	return task;
 }
@@ -62,11 +89,18 @@ void lima_sched_task_delete(struct lima_sched_task *task)
 {
 	int i;
 
-	if (task->fence)
-		dma_fence_put(task->fence);
+	if (task->fence) {
+		struct lima_fence *fence = to_lima_fence(task->fence);
+		if (fence->pipe)
+			dma_fence_put(task->fence);
+		else
+			kfree(fence);
+	}
 
-	for (i = 0; i < task->num_dep; i++)
-		dma_fence_put(task->dep[i]);
+	for (i = 0; i < task->num_dep; i++) {
+		if (task->dep[i])
+			dma_fence_put(task->dep[i]);
+	}
 
 	if (task->dep)
 		kfree(task->dep);
@@ -109,214 +143,224 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
 	return 0;
 }
 
-int lima_sched_task_queue(struct lima_sched_pipe *pipe, struct lima_sched_task *task)
+int lima_sched_context_init(struct lima_sched_pipe *pipe,
+			    struct lima_sched_context *context)
 {
-	struct lima_fence *fence;
+	struct drm_sched_rq *rq = pipe->base.sched_rq + DRM_SCHED_PRIORITY_NORMAL;
 
-	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
-	if (!fence)
-		return -ENOMEM;
-	fence->pipe = pipe;
-
-	spin_lock(&pipe->lock);
-
-	dma_fence_init(&fence->base, &lima_fence_ops, &pipe->fence_lock,
-		       pipe->fence_context, ++pipe->fence_seqno);
-	task->fence = &fence->base;
-
-	/* for caller usage of the fence, otherwise pipe worker 
-	 * may consumed the fence */
-	dma_fence_get(task->fence);
-
-	list_add_tail(&task->list, &pipe->queue);
-
-	spin_unlock(&pipe->lock);
-
-	wake_up(&pipe->worker_idle_wait);
-	return 0;
+	spin_lock_init(&context->lock);
+	return drm_sched_entity_init(&pipe->base, &context->base, rq,
+				     LIMA_SCHED_CONTEXT_MAX_TASK, &context->guilty);
 }
 
-static struct lima_sched_task *lima_sched_pipe_get_task(struct lima_sched_pipe *pipe)
+void lima_sched_context_fini(struct lima_sched_pipe *pipe,
+			     struct lima_sched_context *context)
 {
-	struct lima_sched_task *task;
-
-	spin_lock(&pipe->lock);
-	task = list_first_entry_or_null(&pipe->queue, struct lima_sched_task, list);
-	spin_unlock(&pipe->lock);
-	return task;
+	drm_sched_entity_fini(&pipe->base, &context->base);
 }
 
-#define LIMA_WORKER_WAIT_TIMEOUT_NS 1000000000
-
-static int lima_sched_pipe_worker_wait_fence(struct dma_fence *fence)
+static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
+					     struct dma_fence *fence)
 {
-	int ret;
-	unsigned long timeout = nsecs_to_jiffies(LIMA_WORKER_WAIT_TIMEOUT_NS);
+	uint32_t seq, idx;
+	struct dma_fence *other;
 
-	while (1) {
-		ret = dma_fence_wait_timeout(fence, true, timeout);
+	spin_lock(&context->lock);
 
-		/* interrupted by signal, may be kthread stop */
-		if (ret == -ERESTARTSYS) {
-			if (kthread_should_stop())
-				return ret;
-			else
-				continue;
-		}
+	seq = context->sequence;
+	idx = seq & (LIMA_SCHED_CONTEXT_MAX_TASK - 1);
+	other = context->fences[idx];
 
-		if (ret < 0)
-			return ret;
-
-		if (!ret)
-			return -ETIMEDOUT;
-
-		return 0;
+	if (other) {
+		int err = dma_fence_wait(other, false);
+		if (err)
+			DRM_ERROR("Error %d waiting context fence\n", err);
 	}
 
-	return 0;
+	context->fences[idx] = dma_fence_get(fence);
+	context->sequence++;
+
+	spin_unlock(&context->lock);
+
+	dma_fence_put(other);
+
+	return seq;
 }
 
-static int lima_sched_pipe_worker_wait_busy(struct lima_sched_pipe *pipe)
+static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context *context,
+						      uint32_t seq)
 {
-	int ret;
-	unsigned long timeout = nsecs_to_jiffies(LIMA_WORKER_WAIT_TIMEOUT_NS);
+	struct dma_fence *fence;
+	int idx;
 
-	while (1) {
-		ret = wait_event_interruptible_timeout(
-			pipe->worker_busy_wait,
-			!pipe->worker_is_busy || kthread_should_stop(),
-			timeout);
+	spin_lock(&context->lock);
 
-		/* interrupted by signal, may be kthread stop */
-		if (ret == -ERESTARTSYS) {
-			if (kthread_should_stop())
-				return ret;
-			else
-				continue;
-		}
-
-		if (ret < 0)
-			return ret;
-
-		if (!ret)
-			return -ETIMEDOUT;
-
-		return 0;
+	/* assume no overflow */
+	if (seq >= context->sequence) {
+		fence = ERR_PTR(-EINVAL);
+		goto out;
 	}
 
-	return 0;
+	if (seq + LIMA_SCHED_CONTEXT_MAX_TASK < context->sequence) {
+		fence = NULL;
+		goto out;
+	}
+
+	idx = seq & (LIMA_SCHED_CONTEXT_MAX_TASK - 1);
+	fence = dma_fence_get(context->fences[idx]);
+
+out:
+	spin_unlock(&context->lock);
+
+	return fence;
 }
 
-static int lima_sched_pipe_worker(void *param)
+uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
+				       struct lima_sched_task *task)
 {
-	struct lima_sched_pipe *pipe = param;
-	struct lima_sched_task *task;
+	uint32_t seq = lima_sched_context_add_fence(
+		context, &task->base.s_fence->finished);
+	drm_sched_entity_push_job(&task->base, &context->base);
+	return seq;
+}
 
-	while (!kthread_should_stop()) {
-		int i, ret;
+int lima_sched_context_wait_fence(struct lima_sched_context *context,
+				  u32 fence, u64 timeout_ns)
+{
+	int ret;
+	struct dma_fence *f = lima_sched_context_get_fence(context, fence);
 
-		wait_event_interruptible(pipe->worker_idle_wait,
-					 (task = lima_sched_pipe_get_task(pipe)) ||
-					 kthread_should_stop());
+	if (IS_ERR(f))
+		return PTR_ERR(f);
+	else if (!f)
+		return 0;
 
-		if (!task)
+	if (!timeout_ns)
+		ret = dma_fence_is_signaled(f) ? 0 : -EBUSY;
+	else {
+		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
+
+		ret = dma_fence_wait_timeout(f, true, timeout);
+		if (ret == 0)
+			ret = -ETIMEDOUT;
+		else if (ret > 0)
+			ret = 0;
+	}
+
+	dma_fence_put(f);
+	return ret;
+}
+
+static struct dma_fence *lima_sched_dependency(struct drm_sched_job *job,
+					       struct drm_sched_entity *entity)
+{
+	struct lima_sched_task *task = to_lima_task(job);
+	int i;
+
+	for (i = 0; i < task->num_dep; i++) {
+		struct dma_fence *fence = task->dep[i];
+
+		if (!task->dep[i])
 			continue;
 
-		/* wait all dependent fence be signaled */
-		for (i = 0; i < task->num_dep; i++) {
-			ret = lima_sched_pipe_worker_wait_fence(task->dep[i]);
-			if (ret == -ERESTARTSYS)
-				return 0;
-			if (ret < 0) {
-				DRM_INFO("lima worker wait dep fence error %d\n", ret);
-				goto abort;
-			}
-		}
+		task->dep[i] = NULL;
 
-		/* this is needed for MMU to work correctly, otherwise GP/PP
-		 * will hang or page fault for unknown reason after running for
-		 * a while.
-		 *
-		 * Need to investigate:
-		 * 1. is it related to TLB
-		 * 2. how much performance will be affected by L2 cache flush
-		 * 3. can we reduce the calling of this function because all
-		 *    GP/PP use the same L2 cache
-		 */
-		if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
-			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
-			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
-		} else {
-			lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
-		}
+		if (!dma_fence_is_signaled(fence))
+			return fence;
 
-		for (i = 0; i < pipe->num_mmu; i++)
-			lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
-
-		pipe->worker_is_busy = true;
-		pipe->worker_has_error = false;
-		if (!pipe->start_task(pipe->data, task)) {
-			bool fail;
-
-			ret = lima_sched_pipe_worker_wait_busy(pipe);
-			if (ret == -ERESTARTSYS)
-				return 0;
-
-			fail = ret < 0 || pipe->worker_has_error;
-			pipe->end_task(pipe->data, fail);
-
-			if (fail) {
-				DRM_INFO("lima worker wait task error\n");
-				for (i = 0; i < pipe->num_mmu; i++)
-					lima_mmu_page_fault_resume(pipe->mmu[i]);
-			}
-			else
-				dma_fence_signal(task->fence);
-		}
-
-	abort:
-		spin_lock(&pipe->lock);
-		list_del(&task->list);
-		spin_unlock(&pipe->lock);
-		lima_sched_task_delete(task);
-		/* the only writer of this counter */
-		pipe->fence_done_seqno++;
+		dma_fence_put(fence);
 	}
 
-	return 0;
+	return NULL;
 }
+
+static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
+{
+	struct lima_sched_task *task = to_lima_task(job);
+	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+	struct lima_fence *fence = to_lima_fence(task->fence);
+	struct dma_fence *ret;
+	int i;
+
+	/* after GPU reset */
+	if (job->s_fence->finished.error < 0)
+		return NULL;
+
+	fence->pipe = pipe;
+	dma_fence_init(task->fence, &lima_fence_ops, &pipe->fence_lock,
+		       pipe->fence_context, ++pipe->fence_seqno);
+
+	/* for caller usage of the fence, otherwise irq handler 
+	 * may consume the fence before caller use it */
+	ret = dma_fence_get(task->fence);
+
+	pipe->current_task = task;
+
+	/* this is needed for MMU to work correctly, otherwise GP/PP
+	 * will hang or page fault for unknown reason after running for
+	 * a while.
+	 *
+	 * Need to investigate:
+	 * 1. is it related to TLB
+	 * 2. how much performance will be affected by L2 cache flush
+	 * 3. can we reduce the calling of this function because all
+	 *    GP/PP use the same L2 cache
+	 */
+	if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
+		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
+		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
+	} else {
+		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
+	}
+
+	for (i = 0; i < pipe->num_mmu; i++)
+		lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
+
+	pipe->start_task(pipe->data, task);
+
+	return task->fence;
+}
+
+static void lima_sched_timedout_job(struct drm_sched_job *job)
+{
+	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+
+	kthread_park(pipe->base.thread);
+	drm_sched_hw_job_reset(&pipe->base, job);
+
+	pipe->end_task(pipe->data, true);
+
+	drm_sched_job_recovery(&pipe->base);
+	kthread_unpark(pipe->base.thread);
+}
+
+static void lima_sched_free_job(struct drm_sched_job *job)
+{
+	struct lima_sched_task *task = to_lima_task(job);
+
+	lima_sched_task_delete(task);
+}
+
+const struct drm_sched_backend_ops lima_sched_ops = {
+	.dependency = lima_sched_dependency,
+	.run_job = lima_sched_run_job,
+	.timedout_job = lima_sched_timedout_job,
+	.free_job = lima_sched_free_job,
+};
 
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
 {
-	struct task_struct *worker;
+	const long timeout = msecs_to_jiffies(5000);
 
-	pipe->name = name;
-	spin_lock_init(&pipe->lock);
-	INIT_LIST_HEAD(&pipe->queue);
 	pipe->fence_context = dma_fence_context_alloc(1);
 	spin_lock_init(&pipe->fence_lock);
-	init_waitqueue_head(&pipe->worker_idle_wait);
-	init_waitqueue_head(&pipe->worker_busy_wait);
 
-	worker = kthread_run(lima_sched_pipe_worker, pipe, name);
-	if (IS_ERR(worker)) {
-		DRM_ERROR("Fail to create pipe worker for %s\n", name);
-		return PTR_ERR(worker);
-	}
-	pipe->worker = worker;
-	return 0;
+	return drm_sched_init(&pipe->base, &lima_sched_ops, 1, 0, timeout, name);
 }
 
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe)
 {
-	struct lima_sched_task *task, *tmp;
-
-	kthread_stop(pipe->worker);
-
-	list_for_each_entry_safe(task, tmp, &pipe->queue, list) {
-		list_del(&task->list);
-		lima_sched_task_delete(task);
-	}
+	drm_sched_fini(&pipe->base);
 }
 
 unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
@@ -340,59 +384,14 @@ unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
 	return timeout_jiffies;
 }
 
-static struct dma_fence *lima_sched_pipe_get_fence(struct lima_sched_pipe *pipe, u32 fence)
-{
-	struct lima_sched_task *task;
-	struct dma_fence *f = NULL;
-
-	spin_lock(&pipe->lock);
-	list_for_each_entry(task, &pipe->queue, list) {
-		if (task->fence->seqno < fence)
-			continue;
-
-		if (task->fence->seqno == fence) {
-			f = task->fence;
-			dma_fence_get(f);
-		}
-
-		break;
-	}
-	spin_unlock(&pipe->lock);
-
-	return f;
-}
-
-int lima_sched_pipe_wait_fence(struct lima_sched_pipe *pipe, u32 fence, u64 timeout_ns)
-{
-	int ret = 0;
-
-	if (fence > pipe->fence_seqno)
-		return -EINVAL;
-
-	if (!timeout_ns)
-		return fence <= pipe->fence_done_seqno ? 0 : -EBUSY;
-	else {
-		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
-		struct dma_fence *f = lima_sched_pipe_get_fence(pipe, fence);
-
-		if (f) {
-			ret = dma_fence_wait_timeout(f, true, timeout);
-			if (ret == 0)
-				ret = -ETIMEDOUT;
-			else if (ret > 0)
-				ret = 0;
-			dma_fence_put(f);
-		}
-	}
-
-	return ret;
-}
-
 void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
 {
-	if (error)
-		pipe->worker_has_error = true;
+	struct lima_sched_task *task = pipe->current_task;
 
-	pipe->worker_is_busy = false;
-	wake_up(&pipe->worker_busy_wait);
+	if (!task)
+		return;
+
+	pipe->end_task(pipe->data, error);
+
+	dma_fence_signal(task->fence);
 }
