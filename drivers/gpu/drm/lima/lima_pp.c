@@ -89,6 +89,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	struct lima_device *dev = core->ip.dev;
 	struct lima_pp *pp = dev->pp;
 	u32 state = pp_read(INT_STATUS);
+	bool task_done = false, fail = false;
 
 	/* for shared irq case */
 	if (!state)
@@ -96,17 +97,24 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 
 	if (state & LIMA_PP_IRQ_MASK_ERROR) {
 		u32 status = pp_read(STATUS);
+
 		dev_info(dev->dev, "pp error irq state=%x status=%x\n",
 			 state, status);
-		lima_sched_pipe_task_done(&pp->pipe, true);
+
+		task_done = true;
+		fail = true;
 	}
 	else {
 		if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
 		    atomic_dec_and_test(&pp->task))
-			lima_sched_pipe_task_done(&pp->pipe, false);
+			task_done = true;
 	}
 
 	pp_write(INT_CLEAR, state);
+
+	if (task_done)
+		lima_sched_pipe_task_done(&pp->pipe, fail);
+
 	return IRQ_HANDLED;
 }
 

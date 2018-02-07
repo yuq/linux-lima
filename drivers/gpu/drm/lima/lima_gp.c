@@ -106,6 +106,7 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	struct lima_gp *gp = data;
 	struct lima_device *dev = gp->ip.dev;
 	u32 state = gp_read(INT_STAT);
+	bool task_done = false, fail = false;
 
 	/* for shared irq case */
 	if (!state)
@@ -113,13 +114,14 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 
 	if (state & LIMA_GP_IRQ_MASK_ERROR) {
 		u32 status = gp_read(STATUS);
+
 		dev_info(dev->dev, "gp error irq state=%x status=%x\n",
 			 state, status);
-		lima_sched_pipe_task_done(&gp->pipe, true);
+
+		fail = true;
+		task_done = true;
 	}
 	else {
-		bool task_done = false;
-
 		if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
 			gp->task &= ~LIMA_GP_TASK_VS;
 			task_done = true;
@@ -129,12 +131,16 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 			gp->task &= ~LIMA_GP_TASK_PLBU;
 			task_done = true;
 		}
-
-		if (task_done && !gp->task)
-			lima_sched_pipe_task_done(&gp->pipe, false);
 	}
 
 	gp_write(INT_CLEAR, state);
+
+	if (task_done) {
+		if (fail)
+			lima_sched_pipe_task_done(&gp->pipe, true);
+		else if (!gp->task)
+			lima_sched_pipe_task_done(&gp->pipe, false);
+	}
 	return IRQ_HANDLED;
 }
 
