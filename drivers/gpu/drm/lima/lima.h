@@ -91,6 +91,8 @@ struct lima_pp {
 	atomic_t task;
 };
 
+#define LIMA_MAX_PIPE 2
+
 struct lima_device {
 	struct device *dev;
 	struct drm_device *ddev;
@@ -108,7 +110,7 @@ struct lima_device {
 
 	struct lima_l2_cache *l2_cache;
 
-	struct lima_sched_pipe *pipe[2];
+	struct lima_sched_pipe *pipe[LIMA_MAX_PIPE];
 
 	struct lima_gp *gp;
 	struct lima_pp *pp;
@@ -119,6 +121,7 @@ struct lima_device {
 
 struct lima_drm_priv {
 	struct lima_vm *vm;
+	struct lima_sched_context context[LIMA_MAX_PIPE];
 };
 
 struct lima_bo_va_mapping {
@@ -161,9 +164,9 @@ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
 int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
-int lima_gem_submit(struct drm_file *file, struct lima_sched_pipe *pipe,
-		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
-		    void *frame, u32 *fence);
+int lima_gem_submit(struct drm_file *file, int pipe,
+		    struct drm_lima_gem_submit_bo *bos,
+		    u32 nr_bos, void *frame, u32 *fence);
 int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
 struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct dma_buf_attachment *attach,

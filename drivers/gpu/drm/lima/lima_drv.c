@@ -118,8 +118,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 		break;
 	}
 
-	err = lima_gem_submit(file, ldev->pipe[args->pipe], bos, args->nr_bos,
-			      frame, &args->fence);
+	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, frame, &args->fence);
 
 out1:
 	if (err)
@@ -132,12 +131,13 @@ out0:
 static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct drm_lima_wait_fence *args = data;
-	struct lima_device *ldev = to_lima_dev(dev);
+	struct lima_drm_priv *priv = file->driver_priv;
 
-	if (args->pipe >= ARRAY_SIZE(ldev->pipe))
+	if (args->pipe >= ARRAY_SIZE(priv->context))
 		return -EINVAL;
 
-	return lima_sched_pipe_wait_fence(ldev->pipe[args->pipe], args->fence, args->timeout_ns);
+	return lima_sched_context_wait_fence(priv->context + args->pipe,
+					     args->fence, args->timeout_ns);
 }
 
 static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_file *file)
@@ -152,7 +152,7 @@ static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_fi
 
 static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 {
-	int err;
+	int err, i;
 	struct lima_drm_priv *priv;
 	struct lima_device *ldev = to_lima_dev(dev);
 
@@ -166,9 +166,19 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 		goto err_out0;
 	}
 
+	for (i = 0; i < LIMA_MAX_PIPE; i++) {
+		err = lima_sched_context_init(ldev->pipe[i], priv->context + i);
+		if (err)
+			goto err_out1;
+	}
+
 	file->driver_priv = priv;
 	return 0;
 
+err_out1:
+	for (i--; i >= 0; i--)
+		lima_sched_context_fini(ldev->pipe[i], priv->context + i);
+	lima_vm_put(priv->vm);
 err_out0:
 	kfree(priv);
 	return err;
@@ -177,6 +187,11 @@ err_out0:
 static void lima_drm_driver_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct lima_drm_priv *priv = file->driver_priv;
+	struct lima_device *ldev = to_lima_dev(dev);
+	int i;
+
+	for (i = 0; i < LIMA_MAX_PIPE; i++)
+		lima_sched_context_fini(ldev->pipe[i], priv->context + i);
 
 	lima_vm_put(priv->vm);
 	kfree(priv);
