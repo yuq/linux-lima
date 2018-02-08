@@ -1,8 +1,18 @@
 #include <linux/module.h>
 #include <linux/of_platform.h>
+#include <linux/log2.h>
 #include <drm/drm_prime.h>
 
 #include "lima.h"
+
+int lima_sched_timeout_ms = 0;
+int lima_sched_max_tasks = 32;
+
+MODULE_PARM_DESC(sched_timeout_ms, "task run timeout in ms (0 = no timeout (default))");
+module_param_named(sched_timeout_ms, lima_sched_timeout_ms, int, 0444);
+
+MODULE_PARM_DESC(sched_max_tasks, "max queued task num in a context (default 32)");
+module_param_named(sched_max_tasks, lima_sched_max_tasks, int, 0444);
 
 
 static inline struct lima_device *to_lima_dev(struct drm_device *dev)
@@ -217,6 +227,7 @@ static struct drm_driver lima_drm_driver = {
 	.date               = "20170325",
 	.major              = 1,
 	.minor              = 0,
+	.patchlevel         = 0,
 
 	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
 	.gem_prime_import   = drm_gem_prime_import,
@@ -301,9 +312,19 @@ static struct platform_driver lima_platform_driver = {
 	},
 };
 
+static void lima_check_module_param(void)
+{
+	if (lima_sched_max_tasks < 4)
+		lima_sched_max_tasks = 4;
+	else
+		lima_sched_max_tasks = roundup_pow_of_two(lima_sched_max_tasks);
+}
+
 static int __init lima_init(void)
 {
 	int ret;
+
+	lima_check_module_param();
 
 	ret = platform_driver_register(&lima_platform_driver);
 
