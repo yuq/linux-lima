@@ -158,7 +158,7 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 	}
 
 	for (i = 0; i < LIMA_MAX_PIPE; i++) {
-		err = lima_sched_context_init(ldev->pipe[i], priv->context + i);
+		err = lima_sched_context_init(ldev->pipe[i], priv->context + i, &priv->guilty);
 		if (err)
 			goto err_out1;
 	}

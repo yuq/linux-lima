@@ -179,7 +179,8 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
 }
 
 int lima_sched_context_init(struct lima_sched_pipe *pipe,
-			    struct lima_sched_context *context)
+			    struct lima_sched_context *context,
+			    atomic_t *guilty)
 {
 	struct drm_sched_rq *rq = pipe->base.sched_rq + DRM_SCHED_PRIORITY_NORMAL;
 	int err;
@@ -191,7 +192,7 @@ int lima_sched_context_init(struct lima_sched_pipe *pipe,
 
 	spin_lock_init(&context->lock);
 	err = drm_sched_entity_init(&pipe->base, &context->base, rq,
-				    lima_sched_max_tasks, &context->guilty);
+				    lima_sched_max_tasks, guilty);
 	if (err) {
 		kfree(context->fences);
 		context->fences = NULL;
