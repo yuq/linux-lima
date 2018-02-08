@@ -67,25 +67,15 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	int err = 0;
 	void *frame;
 	struct lima_device *ldev = to_lima_dev(dev);
+	struct lima_sched_pipe *pipe;
 
 	if (args->pipe >= ARRAY_SIZE(ldev->pipe) || args->nr_bos == 0)
 		return -EINVAL;
 
-	switch (ldev->gpu_type) {
-	case GPU_MALI400:
-	case GPU_MALI450:
-		if (args->pipe == LIMA_PIPE_GP) {
-			if (args->frame_size != sizeof(struct drm_lima_m400_gp_frame))
-				return -EINVAL;
-		}
-		else {
-			if (args->frame_size != sizeof(struct drm_lima_m400_pp_frame))
-				return -EINVAL;
-		}
-		break;
-	default:
-		return -EINVAL;
-	}
+	pipe = ldev->pipe[args->pipe];
+	err = pipe->task_validate(pipe->data, NULL, args->frame_size);
+	if (err)
+		return err;
 
 	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
 	if (!bos)
@@ -105,18 +95,9 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 		goto out1;
 	}
 
-	switch (ldev->gpu_type) {
-	case GPU_MALI400:
-	case GPU_MALI450:
-		if (args->pipe == LIMA_PIPE_PP) {
-			struct drm_lima_m400_pp_frame *f = frame;
-			if (f->num_pp > ldev->pp->num_core) {
-				err = -EINVAL;
-				goto out1;
-			}
-		}
-		break;
-	}
+	err = pipe->task_validate(pipe->data, frame, 0);
+	if (err)
+		goto out1;
 
 	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, frame, &args->fence);
 
