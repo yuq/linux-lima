@@ -92,6 +92,7 @@ struct lima_pp {
 	struct lima_sched_pipe pipe;
 	struct lima_l2_cache *l2_cache;
 	atomic_t task;
+	bool error;
 };
 
 #define LIMA_MAX_PIPE 2

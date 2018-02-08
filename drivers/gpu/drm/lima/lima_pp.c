@@ -89,7 +89,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	struct lima_device *dev = core->ip.dev;
 	struct lima_pp *pp = dev->pp;
 	u32 state = pp_read(INT_STATUS);
-	bool task_done = false, fail = false;
+	bool task_done = false;
 
 	/* for shared irq case */
 	if (!state)
@@ -102,18 +102,20 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 			 state, status);
 
 		task_done = true;
-		fail = true;
+		pp->error = true;
+
+		/* mask all interrupts before hard reset */
+		pp_write(INT_MASK, 0);
 	}
 	else {
-		if ((state & LIMA_PP_IRQ_END_OF_FRAME) &&
-		    atomic_dec_and_test(&pp->task))
+		if (state & LIMA_PP_IRQ_END_OF_FRAME)
 			task_done = true;
 	}
 
 	pp_write(INT_CLEAR, state);
 
-	if (task_done)
-		lima_sched_pipe_task_done(&pp->pipe, fail);
+	if (task_done && atomic_dec_and_test(&pp->task))
+		lima_sched_pipe_task_done(&pp->pipe, pp->error);
 
 	return IRQ_HANDLED;
 }
@@ -283,6 +285,7 @@ static void lima_pp_task_run(void *data, struct lima_sched_task *task)
 	struct drm_lima_m400_pp_frame *frame = task->frame;
 	int i;
 
+	pp->error = false;
 	atomic_set(&pp->task, frame->num_pp);
 
 	for (i = 0; i < frame->num_pp; i++)
@@ -307,6 +310,15 @@ static void lima_pp_task_error(void *data)
 		lima_pp_core_hard_reset(pp->core + i);
 }
 
+static void lima_pp_task_mmu_error(void *data)
+{
+	struct lima_pp *pp = data;
+
+	pp->error = true;
+	if (atomic_dec_and_test(&pp->task))
+		lima_sched_pipe_task_done(&pp->pipe, pp->error);
+}
+
 void lima_pp_init(struct lima_pp *pp)
 {
 	int i;
@@ -315,6 +327,7 @@ void lima_pp_init(struct lima_pp *pp)
 	pp->pipe.task_run = lima_pp_task_run;
 	pp->pipe.task_fini = lima_pp_task_fini;
 	pp->pipe.task_error = lima_pp_task_error;
+	pp->pipe.task_mmu_error = lima_pp_task_mmu_error;
 	pp->pipe.data = pp;
 
 	for (i = 0; i < pp->num_core; i++)
