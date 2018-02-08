@@ -147,16 +147,32 @@ int lima_sched_context_init(struct lima_sched_pipe *pipe,
 			    struct lima_sched_context *context)
 {
 	struct drm_sched_rq *rq = pipe->base.sched_rq + DRM_SCHED_PRIORITY_NORMAL;
+	int err;
+
+	context->fences =
+		kzalloc(sizeof(*context->fences) * lima_sched_max_tasks, GFP_KERNEL);
+	if (!context->fences)
+		return -ENOMEM;
 
 	spin_lock_init(&context->lock);
-	return drm_sched_entity_init(&pipe->base, &context->base, rq,
-				     LIMA_SCHED_CONTEXT_MAX_TASK, &context->guilty);
+	err = drm_sched_entity_init(&pipe->base, &context->base, rq,
+				    lima_sched_max_tasks, &context->guilty);
+	if (err) {
+		kfree(context->fences);
+		context->fences = NULL;
+		return err;
+	}
+
+	return 0;
 }
 
 void lima_sched_context_fini(struct lima_sched_pipe *pipe,
 			     struct lima_sched_context *context)
 {
 	drm_sched_entity_fini(&pipe->base, &context->base);
+
+	if (context->fences)
+		kfree(context->fences);
 }
 
 static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
@@ -168,7 +184,7 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 	spin_lock(&context->lock);
 
 	seq = context->sequence;
-	idx = seq & (LIMA_SCHED_CONTEXT_MAX_TASK - 1);
+	idx = seq & (lima_sched_max_tasks - 1);
 	other = context->fences[idx];
 
 	if (other) {
@@ -201,12 +217,12 @@ static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context 
 		goto out;
 	}
 
-	if (seq + LIMA_SCHED_CONTEXT_MAX_TASK < context->sequence) {
+	if (seq + lima_sched_max_tasks < context->sequence) {
 		fence = NULL;
 		goto out;
 	}
 
-	idx = seq & (LIMA_SCHED_CONTEXT_MAX_TASK - 1);
+	idx = seq & (lima_sched_max_tasks - 1);
 	fence = dma_fence_get(context->fences[idx]);
 
 out:
@@ -350,7 +366,12 @@ const struct drm_sched_backend_ops lima_sched_ops = {
 
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
 {
-	const long timeout = msecs_to_jiffies(5000);
+	long timeout;
+
+	if (lima_sched_timeout_ms <= 0)
+		timeout = MAX_SCHEDULE_TIMEOUT;
+	else
+		timeout = msecs_to_jiffies(lima_sched_timeout_ms);
 
 	pipe->fence_context = dma_fence_context_alloc(1);
 	spin_lock_init(&pipe->fence_lock);
