@@ -316,7 +316,7 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	for (i = 0; i < pipe->num_mmu; i++)
 		lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
 
-	pipe->start_task(pipe->data, task);
+	pipe->task_run(pipe->data, task);
 
 	return task->fence;
 }
@@ -328,7 +328,7 @@ static void lima_sched_timedout_job(struct drm_sched_job *job)
 	kthread_park(pipe->base.thread);
 	drm_sched_hw_job_reset(&pipe->base, job);
 
-	pipe->end_task(pipe->data, true);
+	pipe->task_error(pipe->data);
 
 	drm_sched_job_recovery(&pipe->base);
 	kthread_unpark(pipe->base.thread);
@@ -391,7 +391,10 @@ void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
 	if (!task)
 		return;
 
-	pipe->end_task(pipe->data, error);
+	if (error)
+		pipe->task_error(pipe->data);
+	else
+		pipe->task_fini(pipe->data);
 
 	dma_fence_signal(task->fence);
 }

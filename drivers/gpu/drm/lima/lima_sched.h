@@ -60,8 +60,10 @@ struct lima_sched_pipe {
 	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
 	int num_mmu;
 
-	int (*start_task)(void *data, struct lima_sched_task *task);
-	int (*end_task)(void *data, bool fail);
+	int (*task_validate)(void *data, void *frame, uint32_t frame_size);
+	void (*task_run)(void *data, struct lima_sched_task *task);
+	void (*task_fini)(void *data);
+	void (*task_error)(void *data);
 	void *data;
 };
 

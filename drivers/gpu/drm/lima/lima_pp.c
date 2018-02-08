@@ -260,7 +260,24 @@ void lima_pp_core_fini(struct lima_pp_core *core)
 	
 }
 
-static int lima_pp_start_task(void *data, struct lima_sched_task *task)
+static int lima_pp_task_validate(void *data, void *frame, uint32_t frame_size)
+{
+	struct lima_pp *pp = data;
+
+	if (frame_size && frame_size != sizeof(struct drm_lima_m400_pp_frame))
+		return -EINVAL;
+
+	if (frame) {
+		struct drm_lima_m400_pp_frame *f = frame;
+
+		if (f->num_pp > pp->num_core)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void lima_pp_task_run(void *data, struct lima_sched_task *task)
 {
 	struct lima_pp *pp = data;
 	struct drm_lima_m400_pp_frame *frame = task->frame;
@@ -270,31 +287,34 @@ static int lima_pp_start_task(void *data, struct lima_sched_task *task)
 
 	for (i = 0; i < frame->num_pp; i++)
 		lima_pp_core_start_task(pp->core + i, i, task);
-	return 0;
 }
 
-static int lima_pp_end_task(void *data, bool fail)
+static void lima_pp_task_fini(void *data)
 {
 	struct lima_pp *pp = data;
-	int i, err = 0;
-
-	if (fail) {
-		for (i = 0; i < pp->num_core; i++)
-			err |= lima_pp_core_hard_reset(pp->core + i);
-		return err;
-	}
+	int i;
 
 	for (i = 0; i < pp->num_core; i++)
 		lima_pp_core_soft_reset_async(pp->core + i);
-	return 0;
+}
+
+static void lima_pp_task_error(void *data)
+{
+	struct lima_pp *pp = data;
+	int i;
+
+	for (i = 0; i < pp->num_core; i++)
+		lima_pp_core_hard_reset(pp->core + i);
 }
 
 void lima_pp_init(struct lima_pp *pp)
 {
 	int i;
 
-	pp->pipe.start_task = lima_pp_start_task;
-	pp->pipe.end_task = lima_pp_end_task;
+	pp->pipe.task_validate = lima_pp_task_validate;
+	pp->pipe.task_run = lima_pp_task_run;
+	pp->pipe.task_fini = lima_pp_task_fini;
+	pp->pipe.task_error = lima_pp_task_error;
 	pp->pipe.data = pp;
 
 	for (i = 0; i < pp->num_core; i++)
