@@ -63,6 +63,7 @@ struct lima_sched_pipe {
 	void (*task_run)(void *data, struct lima_sched_task *task);
 	void (*task_fini)(void *data);
 	void (*task_error)(void *data);
+	void (*task_mmu_error)(void *data);
 	void *data;
 };
 
@@ -83,5 +84,10 @@ int lima_sched_context_wait_fence(struct lima_sched_context *context,
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
 void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error);
+
+static inline void lima_sched_pipe_mmu_error(struct lima_sched_pipe *pipe)
+{
+	pipe->task_mmu_error(pipe->data);
+}
 
 #endif

@@ -70,9 +70,12 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 		dev_info(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
 	}
 
-	lima_sched_pipe_task_done(mmu->pipe, true);
-
+	/* mask all interrupts before resume */
+	mmu_write(INT_MASK, 0);
 	mmu_write(INT_CLEAR, status);
+
+	lima_sched_pipe_mmu_error(mmu->pipe);
+
 	return IRQ_HANDLED;
 }
 
