@@ -38,11 +38,10 @@ struct lima_sched_task {
 	struct dma_fence *fence;
 };
 
-#define LIMA_SCHED_CONTEXT_MAX_TASK 32
 struct lima_sched_context {
 	struct drm_sched_entity base;
 	spinlock_t lock;
-	struct dma_fence *fences[LIMA_SCHED_CONTEXT_MAX_TASK];
+	struct dma_fence **fences;
 	uint32_t sequence;
 	atomic_t guilty;
 };
