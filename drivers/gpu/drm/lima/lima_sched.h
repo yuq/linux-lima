@@ -43,7 +43,6 @@ struct lima_sched_context {
 	spinlock_t lock;
 	struct dma_fence **fences;
 	uint32_t sequence;
-	atomic_t guilty;
 };
 
 #define LIMA_SCHED_PIPE_MAX_MMU 4
@@ -75,7 +74,8 @@ void lima_sched_task_delete(struct lima_sched_task *task);
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
 
 int lima_sched_context_init(struct lima_sched_pipe *pipe,
-			    struct lima_sched_context *context);
+			    struct lima_sched_context *context,
+			    atomic_t *guilty);
 void lima_sched_context_fini(struct lima_sched_pipe *pipe,
 			     struct lima_sched_context *context);
 uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
