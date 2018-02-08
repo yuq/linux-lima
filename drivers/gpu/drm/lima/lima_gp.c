@@ -120,6 +120,9 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 
 		fail = true;
 		task_done = true;
+
+		/* mask all interrupts before hard reset */
+		gp_write(INT_MASK, 0);
 	}
 	else {
 		if (state & LIMA_GP_IRQ_VS_END_CMD_LST) {
@@ -266,6 +269,13 @@ static void lima_gp_task_error(void *data)
 	lima_gp_hard_reset(data);
 }
 
+static void lima_gp_task_mmu_error(void *data)
+{
+	struct lima_gp *gp = data;
+
+	lima_sched_pipe_task_done(&gp->pipe, true);
+}
+
 static void lima_gp_print_version(struct lima_gp *gp)
 {
 	u32 version, major, minor;
@@ -319,6 +329,7 @@ int lima_gp_init(struct lima_gp *gp)
 	gp->pipe.task_run = lima_gp_task_run;
 	gp->pipe.task_fini = lima_gp_task_fini;
 	gp->pipe.task_error = lima_gp_task_error;
+	gp->pipe.task_mmu_error = lima_gp_task_mmu_error;
 	gp->pipe.data = gp;
 
 	gp->pipe.mmu[0] = &gp->mmu;

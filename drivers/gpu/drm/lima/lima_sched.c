@@ -337,17 +337,29 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	return task->fence;
 }
 
-static void lima_sched_timedout_job(struct drm_sched_job *job)
+static void lima_sched_handle_error_task(struct lima_sched_pipe *pipe,
+					 struct lima_sched_task *task)
 {
-	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+	int i;
 
 	kthread_park(pipe->base.thread);
-	drm_sched_hw_job_reset(&pipe->base, job);
+	drm_sched_hw_job_reset(&pipe->base, &task->base);
 
 	pipe->task_error(pipe->data);
 
+	for (i = 0; i < pipe->num_mmu; i++)
+		lima_mmu_page_fault_resume(pipe->mmu[i]);
+
 	drm_sched_job_recovery(&pipe->base);
 	kthread_unpark(pipe->base.thread);
+}
+
+static void lima_sched_timedout_job(struct drm_sched_job *job)
+{
+	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
+	struct lima_sched_task *task = to_lima_task(job);
+
+	lima_sched_handle_error_task(pipe, task);
 }
 
 static void lima_sched_free_job(struct drm_sched_job *job)
@@ -413,9 +425,9 @@ void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
 		return;
 
 	if (error)
-		pipe->task_error(pipe->data);
-	else
+	        lima_sched_handle_error_task(pipe, task);
+	else {
 		pipe->task_fini(pipe->data);
-
-	dma_fence_signal(task->fence);
+		dma_fence_signal(task->fence);
+	}
 }
