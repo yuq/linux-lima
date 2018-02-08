@@ -7,6 +7,36 @@ struct lima_fence {
 	struct lima_sched_pipe *pipe;
 };
 
+static struct kmem_cache *lima_fence_slab = NULL;
+static struct kmem_cache *lima_sched_task_slab = NULL;
+
+int lima_sched_slab_init(void)
+{
+	lima_fence_slab = kmem_cache_create(
+		"lima_fence", sizeof(struct lima_fence), 0,
+		SLAB_HWCACHE_ALIGN, NULL);
+	if (!lima_fence_slab)
+		return -ENOMEM;
+
+	lima_sched_task_slab = kmem_cache_create(
+		"lima_sched_task", sizeof(struct lima_sched_task), 0,
+		SLAB_HWCACHE_ALIGN, NULL);
+	if (!lima_sched_task_slab) {
+		kmem_cache_destroy(lima_fence_slab);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+void lima_sched_slab_fini(void)
+{
+	if (lima_sched_task_slab)
+		kmem_cache_destroy(lima_sched_task_slab);
+	if (lima_fence_slab)
+		kmem_cache_destroy(lima_fence_slab);
+}
+
 static inline struct lima_fence *to_lima_fence(struct dma_fence *fence)
 {
 	return container_of(fence, struct lima_fence, base);
@@ -29,11 +59,19 @@ static bool lima_fence_enable_signaling(struct dma_fence *fence)
 	return true;
 }
 
+static void lima_fence_release_rcu(struct rcu_head *rcu)
+{
+	struct dma_fence *f = container_of(rcu, struct dma_fence, rcu);
+	struct lima_fence *fence = to_lima_fence(f);
+
+	kmem_cache_free(lima_fence_slab, fence);
+}
+
 static void lima_fence_release(struct dma_fence *fence)
 {
 	struct lima_fence *f = to_lima_fence(fence);
 
-	kfree_rcu(f, base.rcu);
+	call_rcu(&f->base.rcu, lima_fence_release_rcu);
 }
 
 static const struct dma_fence_ops lima_fence_ops = {
@@ -61,45 +99,42 @@ struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *contex
 	struct lima_fence *fence;
 	int err;
 
-	task = kzalloc(sizeof(*task), GFP_KERNEL);
+	task = kmem_cache_zalloc(lima_sched_task_slab, GFP_KERNEL);
 	if (!task)
 		return ERR_PTR(-ENOMEM);
 
-	err = drm_sched_job_init(&task->base, context->base.sched,
-				 &context->base, context);
-	if (err) {
-		kfree(task);
-		return ERR_PTR(err);
+	fence = kmem_cache_zalloc(lima_fence_slab, GFP_KERNEL);
+	if (!fence) {
+	       err = -ENOMEM;
+	       goto err_out0;
 	}
 
-	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
-	if (!fence) {
-		kfree(task);
-		return ERR_PTR(-ENOMEM);
-	}
+	err = drm_sched_job_init(&task->base, context->base.sched,
+				 &context->base, context);
+	if (err)
+		goto err_out1;
 
 	task->vm = lima_vm_get(vm);
 	task->frame = frame;
 	task->fence = &fence->base;
 
 	return task;
+
+err_out1:
+	kmem_cache_free(lima_fence_slab, fence);
+err_out0:
+	kmem_cache_free(lima_sched_task_slab, task);
+	return ERR_PTR(err);
 }
 
 void lima_sched_task_delete(struct lima_sched_task *task)
 {
-	int i;
+	if (task->base.s_fence)
+		dma_fence_put(&task->base.s_fence->finished);
 
 	if (task->fence) {
 		struct lima_fence *fence = to_lima_fence(task->fence);
-		if (fence->pipe)
-			dma_fence_put(task->fence);
-		else
-			kfree(fence);
-	}
-
-	for (i = 0; i < task->num_dep; i++) {
-		if (task->dep[i])
-			dma_fence_put(task->dep[i]);
+		kmem_cache_free(lima_fence_slab, fence);
 	}
 
 	if (task->dep)
@@ -111,7 +146,7 @@ void lima_sched_task_delete(struct lima_sched_task *task)
 	if (task->vm)
 		lima_vm_put(task->vm);
 
-	kfree(task);
+	kmem_cache_free(lima_sched_task_slab, task);
 }
 
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence)
@@ -365,8 +400,26 @@ static void lima_sched_timedout_job(struct drm_sched_job *job)
 static void lima_sched_free_job(struct drm_sched_job *job)
 {
 	struct lima_sched_task *task = to_lima_task(job);
+	int i;
 
-	lima_sched_task_delete(task);
+	if (task->fence)
+		dma_fence_put(task->fence);
+
+	for (i = 0; i < task->num_dep; i++) {
+		if (task->dep[i])
+			dma_fence_put(task->dep[i]);
+	}
+
+	if (task->dep)
+		kfree(task->dep);
+
+	if (task->frame)
+		kfree(task->frame);
+
+	if (task->vm)
+		lima_vm_put(task->vm);
+
+	kmem_cache_free(lima_sched_task_slab, task);
 }
 
 const struct drm_sched_backend_ops lima_sched_ops = {
