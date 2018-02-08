@@ -325,8 +325,13 @@ static int __init lima_init(void)
 	int ret;
 
 	lima_check_module_param();
+	ret = lima_sched_slab_init();
+	if (ret)
+		return ret;
 
 	ret = platform_driver_register(&lima_platform_driver);
+	if (ret)
+		lima_sched_slab_fini();
 
 	return ret;
 }
@@ -335,6 +340,7 @@ module_init(lima_init);
 static void __exit lima_exit(void)
 {
 	platform_driver_unregister(&lima_platform_driver);
+	lima_sched_slab_fini();
 }
 module_exit(lima_exit);
 

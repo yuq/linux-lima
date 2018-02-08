@@ -92,4 +92,7 @@ static inline void lima_sched_pipe_mmu_error(struct lima_sched_pipe *pipe)
 	pipe->task_mmu_error(pipe->data);
 }
 
+int lima_sched_slab_init(void);
+void lima_sched_slab_fini(void);
+
 #endif
