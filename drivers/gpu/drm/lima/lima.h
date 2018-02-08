@@ -29,6 +29,9 @@
 #include "lima_vm.h"
 #include "lima_sched.h"
 
+extern int lima_sched_timeout_ms;
+extern int lima_sched_max_tasks;
+
 enum lima_gpu_type {
 	GPU_MALI400 = 0,
 	GPU_MALI450,
