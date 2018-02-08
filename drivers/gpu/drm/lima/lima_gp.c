@@ -179,17 +179,34 @@ static int lima_gp_soft_reset_async_wait(struct lima_gp *gp)
 	return 0;
 }
 
-static int lima_gp_start_task(void *data, struct lima_sched_task *task)
+static int lima_gp_task_validate(void *data, void *frame, uint32_t frame_size)
+{
+	(void)data;
+
+	if (frame_size && frame_size != sizeof(struct drm_lima_m400_gp_frame))
+		return -EINVAL;
+
+	if (frame) {
+		struct drm_lima_m400_gp_frame *f = frame;
+
+		if (f->vs_cmd_start > f->vs_cmd_end ||
+		    f->plbu_cmd_start > f->plbu_cmd_end ||
+		    f->tile_heap_start > f->tile_heap_end)
+			return -EINVAL;
+
+		if (f->vs_cmd_start == f->vs_cmd_end &&
+		    f->plbu_cmd_start == f->plbu_cmd_end)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+static void lima_gp_task_run(void *data, struct lima_sched_task *task)
 {
 	struct lima_gp *gp = data;
-	struct lima_device *dev = gp->ip.dev;
 	struct drm_lima_m400_gp_frame *frame = task->frame;
 	u32 cmd = 0;
-
-	if (frame->vs_cmd_start > frame->vs_cmd_end ||
-	    frame->plbu_cmd_start > frame->plbu_cmd_end ||
-	    frame->tile_heap_start > frame->tile_heap_end)
-		return -EINVAL;
 
 	gp->task = 0;
 	if (frame->vs_cmd_start != frame->vs_cmd_end) {
@@ -199,11 +216,6 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 	if (frame->plbu_cmd_start != frame->plbu_cmd_end) {
 		cmd |= LIMA_GP_CMD_START_PLBU;
 		gp->task |= LIMA_GP_TASK_PLBU;
-	}
-
-	if (!cmd) {
-		dev_err(dev->dev, "start gp task is empty\n");
-		return -EINVAL;
 	}
 
 	/* before any hw ops, wait last success task async soft reset */
@@ -218,7 +230,6 @@ static int lima_gp_start_task(void *data, struct lima_sched_task *task)
 
 	gp_write(CMD, LIMA_GP_CMD_UPDATE_PLBU_ALLOC);
 	gp_write(CMD, cmd);
-	return 0;
 }
 
 static int lima_gp_hard_reset(struct lima_gp *gp)
@@ -245,14 +256,14 @@ static int lima_gp_hard_reset(struct lima_gp *gp)
 	return 0;
 }
 
-static int lima_gp_end_task(void *data, bool fail)
+static void lima_gp_task_fini(void *data)
 {
-	/* when task fail, to hard reset, otherwise soft reset */
-	if (fail)
-		return lima_gp_hard_reset(data);
-
 	lima_gp_soft_reset_async(data);
-	return 0;
+}
+
+static void lima_gp_task_error(void *data)
+{
+	lima_gp_hard_reset(data);
 }
 
 static void lima_gp_print_version(struct lima_gp *gp)
@@ -304,9 +315,12 @@ int lima_gp_init(struct lima_gp *gp)
 		return err;
 	}
 
-	gp->pipe.start_task = lima_gp_start_task;
-	gp->pipe.end_task = lima_gp_end_task;
+	gp->pipe.task_validate = lima_gp_task_validate;
+	gp->pipe.task_run = lima_gp_task_run;
+	gp->pipe.task_fini = lima_gp_task_fini;
+	gp->pipe.task_error = lima_gp_task_error;
 	gp->pipe.data = gp;
+
 	gp->pipe.mmu[0] = &gp->mmu;
 	gp->pipe.num_mmu = 1;
 	return 0;
