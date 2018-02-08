@@ -376,6 +376,15 @@ const struct drm_sched_backend_ops lima_sched_ops = {
 	.free_job = lima_sched_free_job,
 };
 
+static void lima_sched_error_work(struct work_struct *work)
+{
+	struct lima_sched_pipe *pipe =
+		container_of(work, struct lima_sched_pipe, error_work);
+	struct lima_sched_task *task = pipe->current_task;
+
+	lima_sched_handle_error_task(pipe, task);
+}
+
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
 {
 	long timeout;
@@ -387,6 +396,8 @@ int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name)
 
 	pipe->fence_context = dma_fence_context_alloc(1);
 	spin_lock_init(&pipe->fence_lock);
+
+	INIT_WORK(&pipe->error_work, lima_sched_error_work);
 
 	return drm_sched_init(&pipe->base, &lima_sched_ops, 1, 0, timeout, name);
 }
@@ -419,14 +430,11 @@ unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
 
 void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
 {
-	struct lima_sched_task *task = pipe->current_task;
-
-	if (!task)
-		return;
-
 	if (error)
-	        lima_sched_handle_error_task(pipe, task);
+	        schedule_work(&pipe->error_work);
 	else {
+		struct lima_sched_task *task = pipe->current_task;
+
 		pipe->task_fini(pipe->data);
 		dma_fence_signal(task->fence);
 	}
