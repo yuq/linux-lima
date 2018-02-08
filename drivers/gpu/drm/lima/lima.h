@@ -126,6 +126,7 @@ struct lima_device {
 struct lima_drm_priv {
 	struct lima_vm *vm;
 	struct lima_sched_context context[LIMA_MAX_PIPE];
+	atomic_t guilty;
 };
 
 struct lima_bo_va_mapping {
