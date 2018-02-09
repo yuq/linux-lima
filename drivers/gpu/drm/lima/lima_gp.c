@@ -182,25 +182,19 @@ static int lima_gp_soft_reset_async_wait(struct lima_gp *gp)
 	return 0;
 }
 
-static int lima_gp_task_validate(void *data, void *frame, uint32_t frame_size)
+static int lima_gp_task_validate(void *data, struct lima_sched_task *task)
 {
+	struct drm_lima_m400_gp_frame *f = task->frame;
 	(void)data;
 
-	if (frame_size && frame_size != sizeof(struct drm_lima_m400_gp_frame))
+	if (f->vs_cmd_start > f->vs_cmd_end ||
+	    f->plbu_cmd_start > f->plbu_cmd_end ||
+	    f->tile_heap_start > f->tile_heap_end)
 		return -EINVAL;
 
-	if (frame) {
-		struct drm_lima_m400_gp_frame *f = frame;
-
-		if (f->vs_cmd_start > f->vs_cmd_end ||
-		    f->plbu_cmd_start > f->plbu_cmd_end ||
-		    f->tile_heap_start > f->tile_heap_end)
-			return -EINVAL;
-
-		if (f->vs_cmd_start == f->vs_cmd_end &&
-		    f->plbu_cmd_start == f->plbu_cmd_end)
-			return -EINVAL;
-	}
+	if (f->vs_cmd_start == f->vs_cmd_end &&
+	    f->plbu_cmd_start == f->plbu_cmd_end)
+		return -EINVAL;
 
 	return 0;
 }
@@ -305,10 +299,13 @@ static void lima_gp_print_version(struct lima_gp *gp)
 		 gp->ip.name, name, major, minor);
 }
 
+static struct kmem_cache *lima_gp_task_slab = NULL;
+static int lima_gp_task_slab_refcnt = 0;
+
 int lima_gp_init(struct lima_gp *gp)
 {
 	struct lima_device *dev = gp->ip.dev;
-	int err;
+	int err, frame_size;
 
 	lima_gp_print_version(gp);
 
@@ -325,6 +322,19 @@ int lima_gp_init(struct lima_gp *gp)
 		return err;
 	}
 
+	frame_size = sizeof(struct drm_lima_m400_gp_frame);
+	if (!lima_gp_task_slab) {
+		lima_gp_task_slab = kmem_cache_create(
+			"lima_gp_task", sizeof(struct lima_sched_task) + frame_size,
+			0, SLAB_HWCACHE_ALIGN, NULL);
+		if (!lima_gp_task_slab)
+			return -ENOMEM;
+	}
+	lima_gp_task_slab_refcnt++;
+
+	gp->pipe.frame_size = frame_size;
+	gp->pipe.task_slab = lima_gp_task_slab;
+
 	gp->pipe.task_validate = lima_gp_task_validate;
 	gp->pipe.task_run = lima_gp_task_run;
 	gp->pipe.task_fini = lima_gp_task_fini;
@@ -339,5 +349,8 @@ int lima_gp_init(struct lima_gp *gp)
 
 void lima_gp_fini(struct lima_gp *gp)
 {
-
+	if (!--lima_gp_task_slab_refcnt) {
+		kmem_cache_destroy(lima_gp_task_slab);
+		lima_gp_task_slab = NULL;
+	}
 }

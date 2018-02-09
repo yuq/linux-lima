@@ -414,13 +414,12 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
 }
 
 int lima_gem_submit(struct drm_file *file, int pipe,
-		    struct drm_lima_gem_submit_bo *bos,
-		    u32 nr_bos, void *frame, u32 *fence)
+		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
+		    struct lima_sched_task *task, u32 *fence)
 {
 	struct lima_bo **lbos;
 	int i, err = 0;
 	struct ww_acquire_ctx ctx;
-	struct lima_sched_task *task;
 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
 
 	lbos = kzalloc(sizeof(*lbos) * nr_bos, GFP_KERNEL);
@@ -442,11 +441,9 @@ int lima_gem_submit(struct drm_file *file, int pipe,
 	if (err)
 		goto out0;
 
-	task = lima_sched_task_create(priv->context + pipe, priv->vm, frame);
-	if (IS_ERR(task)) {
-		err = PTR_ERR(task);
+	err = lima_sched_task_init(task, priv->context + pipe, priv->vm);
+	if (err)
 		goto out1;
-	}
 
 	for (i = 0; i < nr_bos; i++) {
 		err = lima_gem_sync_bo(task, lbos[i], bos[i].flags & LIMA_SUBMIT_BO_WRITE);
@@ -467,7 +464,7 @@ int lima_gem_submit(struct drm_file *file, int pipe,
 
 out2:
 	if (err)
-		lima_sched_task_delete(task);
+		lima_sched_task_fini(task);
 out1:
 	for (i = 0; i < nr_bos; i++)
 		ww_mutex_unlock(&lbos[i]->resv->lock);

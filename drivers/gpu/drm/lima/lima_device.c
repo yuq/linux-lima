@@ -236,7 +236,11 @@ static int lima_pp_group_init(struct lima_device *dev)
 	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
 	for (i = 0; i < pp->num_core; i++)
 		pp->core[i].mmu.pipe = &pp->pipe;
-	lima_pp_init(pp);
+
+	err = lima_pp_init(pp);
+	if (err)
+		return err;
+
 	return 0;
 }
 
@@ -336,6 +340,8 @@ void lima_device_fini(struct lima_device *ldev)
 	}
 
 	if (ldev->pp) {
+		lima_pp_fini(ldev->pp);
+
 		for (i = 0; i < ldev->pp->num_core; i++) {
 			lima_pp_core_fini(ldev->pp->core + i);
 			lima_mmu_fini(&ldev->pp->core[i].mmu);
