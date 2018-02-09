@@ -158,7 +158,8 @@ void lima_gp_fini(struct lima_gp *gp);
 
 int lima_pp_core_init(struct lima_pp_core *core);
 void lima_pp_core_fini(struct lima_pp_core *core);
-void lima_pp_init(struct lima_pp *pp);
+int lima_pp_init(struct lima_pp *pp);
+void lima_pp_fini(struct lima_pp *pp);
 
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 			   u32 size, u32 flags, u32 *handle);
@@ -170,8 +171,8 @@ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
 int lima_gem_submit(struct drm_file *file, int pipe,
-		    struct drm_lima_gem_submit_bo *bos,
-		    u32 nr_bos, void *frame, u32 *fence);
+		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
+		    struct lima_sched_task *task, u32 *fence);
 int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
 struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct dma_buf_attachment *attach,
