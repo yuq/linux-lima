@@ -75,17 +75,16 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	struct drm_lima_gem_submit *args = data;
 	struct drm_lima_gem_submit_bo *bos;
 	int err = 0;
-	void *frame;
 	struct lima_device *ldev = to_lima_dev(dev);
 	struct lima_sched_pipe *pipe;
+	struct lima_sched_task *task;
 
 	if (args->pipe >= ARRAY_SIZE(ldev->pipe) || args->nr_bos == 0)
 		return -EINVAL;
 
 	pipe = ldev->pipe[args->pipe];
-	err = pipe->task_validate(pipe->data, NULL, args->frame_size);
-	if (err)
-		return err;
+	if (args->frame_size != pipe->frame_size)
+		return -EINVAL;
 
 	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
 	if (!bos)
@@ -95,25 +94,27 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 		goto out0;
 	}
 
-	frame = kmalloc(args->frame_size, GFP_KERNEL);
-	if (!frame) {
+	task = kmem_cache_zalloc(pipe->task_slab, GFP_KERNEL);
+	if (!task) {
 		err = -ENOMEM;
 		goto out0;
 	}
-	if (copy_from_user(frame, u64_to_user_ptr(args->frame), args->frame_size)) {
+
+	task->frame = task + 1;
+	if (copy_from_user(task->frame, u64_to_user_ptr(args->frame), args->frame_size)) {
 		err = -EFAULT;
 		goto out1;
 	}
 
-	err = pipe->task_validate(pipe->data, frame, 0);
+	err = pipe->task_validate(pipe->data, task);
 	if (err)
 		goto out1;
 
-	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, frame, &args->fence);
+	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, task, &args->fence);
 
 out1:
 	if (err)
-		kfree(frame);
+		kmem_cache_free(pipe->task_slab, task);
 out0:
 	kfree(bos);
 	return err;

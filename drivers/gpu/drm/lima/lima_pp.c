@@ -262,19 +262,13 @@ void lima_pp_core_fini(struct lima_pp_core *core)
 	
 }
 
-static int lima_pp_task_validate(void *data, void *frame, uint32_t frame_size)
+static int lima_pp_task_validate(void *data, struct lima_sched_task *task)
 {
 	struct lima_pp *pp = data;
+	struct drm_lima_m400_pp_frame *f = task->frame;
 
-	if (frame_size && frame_size != sizeof(struct drm_lima_m400_pp_frame))
+	if (f->num_pp > pp->num_core)
 		return -EINVAL;
-
-	if (frame) {
-		struct drm_lima_m400_pp_frame *f = frame;
-
-		if (f->num_pp > pp->num_core)
-			return -EINVAL;
-	}
 
 	return 0;
 }
@@ -319,9 +313,25 @@ static void lima_pp_task_mmu_error(void *data)
 		lima_sched_pipe_task_done(&pp->pipe, pp->error);
 }
 
-void lima_pp_init(struct lima_pp *pp)
+static struct kmem_cache *lima_pp_task_slab = NULL;
+static int lima_pp_task_slab_refcnt = 0;
+
+int lima_pp_init(struct lima_pp *pp)
 {
-	int i;
+	int i, frame_size;
+
+	frame_size = sizeof(struct drm_lima_m400_pp_frame);
+	if (!lima_pp_task_slab) {
+		lima_pp_task_slab = kmem_cache_create(
+			"lima_pp_task", sizeof(struct lima_sched_task) + frame_size,
+			0, SLAB_HWCACHE_ALIGN, NULL);
+		if (!lima_pp_task_slab)
+			return -ENOMEM;
+	}
+	lima_pp_task_slab_refcnt++;
+
+	pp->pipe.frame_size = frame_size;
+	pp->pipe.task_slab = lima_pp_task_slab;
 
 	pp->pipe.task_validate = lima_pp_task_validate;
 	pp->pipe.task_run = lima_pp_task_run;
@@ -333,4 +343,13 @@ void lima_pp_init(struct lima_pp *pp)
 	for (i = 0; i < pp->num_core; i++)
 		pp->pipe.mmu[i] = &pp->core[i].mmu;
 	pp->pipe.num_mmu = pp->num_core;
+	return 0;
+}
+
+void lima_pp_fini(struct lima_pp *pp)
+{
+	if (!--lima_pp_task_slab_refcnt) {
+		kmem_cache_destroy(lima_pp_task_slab);
+		lima_pp_task_slab = NULL;
+	}
 }

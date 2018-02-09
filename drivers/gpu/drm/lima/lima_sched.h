@@ -58,7 +58,10 @@ struct lima_sched_pipe {
 	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
 	int num_mmu;
 
-	int (*task_validate)(void *data, void *frame, uint32_t frame_size);
+	int frame_size;
+	struct kmem_cache *task_slab;
+
+	int (*task_validate)(void *data, struct lima_sched_task *task);
 	void (*task_run)(void *data, struct lima_sched_task *task);
 	void (*task_fini)(void *data);
 	void (*task_error)(void *data);
@@ -68,9 +71,10 @@ struct lima_sched_pipe {
 	struct work_struct error_work;
 };
 
-struct lima_sched_task *lima_sched_task_create(struct lima_sched_context *context,
-					       struct lima_vm *vm, void *frame);
-void lima_sched_task_delete(struct lima_sched_task *task);
+int lima_sched_task_init(struct lima_sched_task *task,
+			 struct lima_sched_context *context,
+			 struct lima_vm *vm);
+void lima_sched_task_fini(struct lima_sched_task *task);
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence);
 
 int lima_sched_context_init(struct lima_sched_pipe *pipe,
