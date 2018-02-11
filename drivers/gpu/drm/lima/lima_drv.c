@@ -73,23 +73,29 @@ static int lima_ioctl_gem_va(struct drm_device *dev, void *data, struct drm_file
 static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct drm_lima_gem_submit *args = data;
-	struct drm_lima_gem_submit_bo *bos;
-	int err = 0;
 	struct lima_device *ldev = to_lima_dev(dev);
+	struct lima_drm_priv *priv = file->driver_priv;
+	struct drm_lima_gem_submit_bo *bos;
 	struct lima_sched_pipe *pipe;
 	struct lima_sched_task *task;
+	struct lima_ctx *ctx;
+	struct lima_submit submit = {0};
+	int err = 0, size;
 
-	if (args->pipe >= ARRAY_SIZE(ldev->pipe) || args->nr_bos == 0)
+	if (args->pipe >= LIMA_MAX_PIPE || args->nr_bos == 0)
 		return -EINVAL;
 
 	pipe = ldev->pipe[args->pipe];
 	if (args->frame_size != pipe->frame_size)
 		return -EINVAL;
 
-	bos = kmalloc(args->nr_bos * sizeof(*bos), GFP_KERNEL);
+	size = args->nr_bos * (sizeof(*submit.bos) + sizeof(*submit.lbos));
+	bos = kzalloc(size, GFP_KERNEL);
 	if (!bos)
 		return -ENOMEM;
-	if (copy_from_user(bos, u64_to_user_ptr(args->bos), args->nr_bos * sizeof(*bos))) {
+
+	size = args->nr_bos * sizeof(*submit.bos);
+	if (copy_from_user(bos, u64_to_user_ptr(args->bos), size)) {
 		err = -EFAULT;
 		goto out0;
 	}
@@ -110,8 +116,22 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	if (err)
 		goto out1;
 
-	err = lima_gem_submit(file, args->pipe, bos, args->nr_bos, task, &args->fence);
+	ctx = lima_ctx_get(&priv->ctx_mgr, args->ctx);
+	if (!ctx) {
+		err = -ENOENT;
+		goto out1;
+	}
 
+	submit.pipe = args->pipe;
+	submit.bos = bos;
+	submit.lbos = (void *)bos + size;
+	submit.nr_bos = args->nr_bos;
+	submit.task = task;
+	submit.ctx = ctx;
+
+	err = lima_gem_submit(file, &submit, &args->fence);
+
+	lima_ctx_put(ctx);
 out1:
 	if (err)
 		kmem_cache_free(pipe->task_slab, task);
@@ -124,12 +144,21 @@ static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_
 {
 	struct drm_lima_wait_fence *args = data;
 	struct lima_drm_priv *priv = file->driver_priv;
+	struct lima_ctx *ctx;
+	int err;
 
-	if (args->pipe >= ARRAY_SIZE(priv->context))
+	if (args->pipe >= LIMA_MAX_PIPE)
 		return -EINVAL;
 
-	return lima_sched_context_wait_fence(priv->context + args->pipe,
-					     args->fence, args->timeout_ns);
+	ctx = lima_ctx_get(&priv->ctx_mgr, args->ctx);
+	if (!ctx)
+		return -ENOENT;
+
+	err = lima_sched_context_wait_fence(ctx->context + args->pipe,
+					    args->fence, args->timeout_ns);
+
+	lima_ctx_put(ctx);
+	return err;
 }
 
 static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_file *file)
@@ -142,9 +171,23 @@ static int lima_ioctl_gem_wait(struct drm_device *dev, void *data, struct drm_fi
 	return lima_gem_wait(file, args->handle, args->op, args->timeout_ns);
 }
 
+static int lima_ioctl_ctx(struct drm_device *dev, void *data, struct drm_file *file)
+{
+	struct drm_lima_ctx *args = data;
+	struct lima_drm_priv *priv = file->driver_priv;
+	struct lima_device *ldev = to_lima_dev(dev);
+
+	if (args->op == LIMA_CTX_OP_CREATE)
+		return lima_ctx_create(ldev, &priv->ctx_mgr, &args->id);
+	else if (args->op == LIMA_CTX_OP_FREE)
+		return lima_ctx_free(&priv->ctx_mgr, args->id);
+
+	return -EINVAL;
+}
+
 static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 {
-	int err, i;
+	int err;
 	struct lima_drm_priv *priv;
 	struct lima_device *ldev = to_lima_dev(dev);
 
@@ -158,19 +201,11 @@ static int lima_drm_driver_open(struct drm_device *dev, struct drm_file *file)
 		goto err_out0;
 	}
 
-	for (i = 0; i < LIMA_MAX_PIPE; i++) {
-		err = lima_sched_context_init(ldev->pipe[i], priv->context + i, &priv->guilty);
-		if (err)
-			goto err_out1;
-	}
+        lima_ctx_mgr_init(&priv->ctx_mgr);
 
 	file->driver_priv = priv;
 	return 0;
 
-err_out1:
-	for (i--; i >= 0; i--)
-		lima_sched_context_fini(ldev->pipe[i], priv->context + i);
-	lima_vm_put(priv->vm);
 err_out0:
 	kfree(priv);
 	return err;
@@ -179,12 +214,8 @@ err_out0:
 static void lima_drm_driver_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct lima_drm_priv *priv = file->driver_priv;
-	struct lima_device *ldev = to_lima_dev(dev);
-	int i;
 
-	for (i = 0; i < LIMA_MAX_PIPE; i++)
-		lima_sched_context_fini(ldev->pipe[i], priv->context + i);
-
+        lima_ctx_mgr_fini(&priv->ctx_mgr);
 	lima_vm_put(priv->vm);
 	kfree(priv);
 }
@@ -197,6 +228,7 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_SUBMIT, lima_ioctl_gem_submit, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_WAIT_FENCE, lima_ioctl_wait_fence, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(LIMA_GEM_WAIT, lima_ioctl_gem_wait, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(LIMA_CTX, lima_ioctl_ctx, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 extern const struct vm_operations_struct lima_gem_vm_ops;

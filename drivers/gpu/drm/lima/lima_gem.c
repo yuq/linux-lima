@@ -413,66 +413,61 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
 	return 0;
 }
 
-int lima_gem_submit(struct drm_file *file, int pipe,
-		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
-		    struct lima_sched_task *task, u32 *fence)
+int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence)
 {
-	struct lima_bo **lbos;
 	int i, err = 0;
 	struct ww_acquire_ctx ctx;
 	struct lima_drm_priv *priv = to_lima_drm_priv(file);
 
-	lbos = kzalloc(sizeof(*lbos) * nr_bos, GFP_KERNEL);
-	if (!lbos)
-		return -ENOMEM;
-
-	for (i = 0; i < nr_bos; i++) {
+	for (i = 0; i < submit->nr_bos; i++) {
 		struct drm_gem_object *obj;
 
-		obj = drm_gem_object_lookup(file, bos[i].handle);
+		obj = drm_gem_object_lookup(file, submit->bos[i].handle);
 		if (!obj) {
 			err = -ENOENT;
 			goto out0;
 		}
-		lbos[i] = to_lima_bo(obj);
+		submit->lbos[i] = to_lima_bo(obj);
 	}
 
-	err = lima_gem_lock_bos(lbos, nr_bos, &ctx);
+	err = lima_gem_lock_bos(submit->lbos, submit->nr_bos, &ctx);
 	if (err)
 		goto out0;
 
-	err = lima_sched_task_init(task, priv->context + pipe, priv->vm);
+	err = lima_sched_task_init(
+		submit->task, submit->ctx->context + submit->pipe, priv->vm);
 	if (err)
 		goto out1;
 
-	for (i = 0; i < nr_bos; i++) {
-		err = lima_gem_sync_bo(task, lbos[i], bos[i].flags & LIMA_SUBMIT_BO_WRITE);
+	for (i = 0; i < submit->nr_bos; i++) {
+		err = lima_gem_sync_bo(submit->task, submit->lbos[i],
+				       submit->bos[i].flags & LIMA_SUBMIT_BO_WRITE);
 		if (err)
 			goto out2;
 	}
 
-	for (i = 0; i < nr_bos; i++) {
-		if (bos[i].flags & LIMA_SUBMIT_BO_WRITE)
+	for (i = 0; i < submit->nr_bos; i++) {
+		if (submit->bos[i].flags & LIMA_SUBMIT_BO_WRITE)
 			reservation_object_add_excl_fence(
-				lbos[i]->resv, &task->base.s_fence->finished);
+				submit->lbos[i]->resv, &submit->task->base.s_fence->finished);
 		else
 			reservation_object_add_shared_fence(
-				lbos[i]->resv, &task->base.s_fence->finished);
+				submit->lbos[i]->resv, &submit->task->base.s_fence->finished);
 	}
 
-	*fence = lima_sched_context_queue_task(priv->context + pipe, task);
+	*fence = lima_sched_context_queue_task(
+		submit->ctx->context + submit->pipe, submit->task);
 
 out2:
 	if (err)
-		lima_sched_task_fini(task);
+		lima_sched_task_fini(submit->task);
 out1:
-	for (i = 0; i < nr_bos; i++)
-		ww_mutex_unlock(&lbos[i]->resv->lock);
+	for (i = 0; i < submit->nr_bos; i++)
+		ww_mutex_unlock(&submit->lbos[i]->resv->lock);
 	ww_acquire_fini(&ctx);
 out0:
-	for (i = 0; i < nr_bos && lbos[i]; i++)
-		drm_gem_object_unreference_unlocked(&lbos[i]->gem);
-	kfree(lbos);
+	for (i = 0; i < submit->nr_bos && submit->lbos[i]; i++)
+		drm_gem_object_unreference_unlocked(&submit->lbos[i]->gem);
 	return err;
 }
 
