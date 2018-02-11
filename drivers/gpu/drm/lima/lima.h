@@ -123,10 +123,21 @@ struct lima_device {
 	struct lima_vm *empty_vm;
 };
 
-struct lima_drm_priv {
-	struct lima_vm *vm;
+struct lima_ctx {
+	struct kref refcnt;
+	struct lima_device *dev;
 	struct lima_sched_context context[LIMA_MAX_PIPE];
 	atomic_t guilty;
+};
+
+struct lima_ctx_mgr {
+	spinlock_t lock;
+	struct idr handles;
+};
+
+struct lima_drm_priv {
+	struct lima_vm *vm;
+	struct lima_ctx_mgr ctx_mgr;
 };
 
 struct lima_bo_va_mapping {
@@ -135,6 +146,17 @@ struct lima_bo_va_mapping {
 	uint32_t start;
 	uint32_t last;
 	uint32_t __subtree_last;
+};
+
+struct lima_submit {
+	struct lima_ctx *ctx;
+	int pipe;
+
+	struct drm_lima_gem_submit_bo *bos;
+	struct lima_bo **lbos;
+	u32 nr_bos;
+
+	struct lima_sched_task *task;
 };
 
 int lima_device_init(struct lima_device *ldev);
@@ -170,9 +192,7 @@ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
 int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
-int lima_gem_submit(struct drm_file *file, int pipe,
-		    struct drm_lima_gem_submit_bo *bos, u32 nr_bos,
-		    struct lima_sched_task *task, u32 *fence);
+int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence);
 int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
 struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct dma_buf_attachment *attach,
@@ -181,5 +201,12 @@ struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj);
 struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj);
 
 unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
+
+int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id);
+int lima_ctx_free(struct lima_ctx_mgr *mgr, u32 id);
+struct lima_ctx *lima_ctx_get(struct lima_ctx_mgr *mgr, u32 id);
+void lima_ctx_put(struct lima_ctx *ctx);
+void lima_ctx_mgr_init(struct lima_ctx_mgr *mgr);
+void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr);
 
 #endif
