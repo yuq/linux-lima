@@ -413,7 +413,7 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
 	return 0;
 }
 
-int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence)
+int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
 {
 	int i, err = 0;
 	struct ww_acquire_ctx ctx;
@@ -455,8 +455,8 @@ int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fenc
 				submit->lbos[i]->resv, &submit->task->base.s_fence->finished);
 	}
 
-	*fence = lima_sched_context_queue_task(
-		submit->ctx->context + submit->pipe, submit->task);
+	submit->fence = lima_sched_context_queue_task(
+		submit->ctx->context + submit->pipe, submit->task, &submit->done);
 
 out2:
 	if (err)

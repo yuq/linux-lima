@@ -157,6 +157,9 @@ struct lima_submit {
 	u32 nr_bos;
 
 	struct lima_sched_task *task;
+
+	uint32_t fence;
+	uint32_t done;
 };
 
 int lima_device_init(struct lima_device *ldev);
@@ -192,7 +195,7 @@ int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
 int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
 int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
-int lima_gem_submit(struct drm_file *file, struct lima_submit *submit, u32 *fence);
+int lima_gem_submit(struct drm_file *file, struct lima_submit *submit);
 int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
 struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
 						      struct dma_buf_attachment *attach,
