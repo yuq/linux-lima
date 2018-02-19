@@ -179,9 +179,10 @@ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
 }
 
 static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
-					     struct dma_fence *fence)
+					     struct dma_fence *fence,
+					     uint32_t *done)
 {
-	uint32_t seq, idx;
+	uint32_t seq, idx, i, n;
 	struct dma_fence *other;
 
 	spin_lock(&context->lock);
@@ -199,10 +200,19 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 	context->fences[idx] = dma_fence_get(fence);
 	context->sequence++;
 
+	/* get finished fence offset from seq */
+	n = min(seq + 1, (uint32_t)lima_sched_max_tasks);
+	for (i = 1; i < n; i++) {
+		idx = (seq - i) & (lima_sched_max_tasks - 1);
+		if (dma_fence_is_signaled(context->fences[idx]))
+			break;
+	}
+
 	spin_unlock(&context->lock);
 
 	dma_fence_put(other);
 
+	*done = i;
 	return seq;
 }
 
@@ -235,10 +245,11 @@ out:
 }
 
 uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
-				       struct lima_sched_task *task)
+				       struct lima_sched_task *task,
+				       uint32_t *done)
 {
 	uint32_t seq = lima_sched_context_add_fence(
-		context, &task->base.s_fence->finished);
+		context, &task->base.s_fence->finished, done);
 	drm_sched_entity_push_job(&task->base, &context->base);
 	return seq;
 }
