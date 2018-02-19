@@ -72,7 +72,7 @@ static int lima_ioctl_gem_va(struct drm_device *dev, void *data, struct drm_file
 
 static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_file *file)
 {
-	struct drm_lima_gem_submit *args = data;
+	struct drm_lima_gem_submit_in *args = data;
 	struct lima_device *ldev = to_lima_dev(dev);
 	struct lima_drm_priv *priv = file->driver_priv;
 	struct drm_lima_gem_submit_bo *bos;
@@ -129,7 +129,12 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	submit.task = task;
 	submit.ctx = ctx;
 
-	err = lima_gem_submit(file, &submit, &args->fence);
+	err = lima_gem_submit(file, &submit);
+	if (!err) {
+		struct drm_lima_gem_submit_out *out = data;
+		out->fence = submit.fence;
+		out->done = submit.done;
+	}
 
 	lima_ctx_put(ctx);
 out1:
