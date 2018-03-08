@@ -4,6 +4,8 @@
 #include <drm/drm_prime.h>
 
 #include "lima.h"
+#include "lima_gem.h"
+#include "lima_gem_prime.h"
 
 int lima_sched_timeout_ms = 0;
 int lima_sched_max_tasks = 32;
@@ -43,7 +45,10 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
 {
 	struct drm_lima_gem_create *args = data;
 
-	if (args->flags || args->size == 0)
+	if (args->flags & ~(LIMA_GEM_CREATE_CONTIGUOUS))
+		return -EINVAL;
+
+	if (args->size == 0)
 		return -EINVAL;
 
 	return lima_gem_create_handle(dev, file, args->size, args->flags, &args->handle);

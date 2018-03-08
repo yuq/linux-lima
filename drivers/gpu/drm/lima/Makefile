@@ -9,6 +9,7 @@ lima-y := \
 	lima_gem.o \
 	lima_vm.o \
 	lima_sched.o \
-	lima_ctx.o
+	lima_ctx.o \
+	lima_gem_prime.o
 
 obj-$(CONFIG_DRM_LIMA) += lima.o
