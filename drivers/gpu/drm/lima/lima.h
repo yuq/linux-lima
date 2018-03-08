@@ -162,6 +162,12 @@ struct lima_submit {
 	uint32_t done;
 };
 
+static inline struct lima_drm_priv *
+to_lima_drm_priv(struct drm_file *file)
+{
+	return file->driver_priv;
+}
+
 int lima_device_init(struct lima_device *ldev);
 void lima_device_fini(struct lima_device *ldev);
 
@@ -185,23 +191,6 @@ int lima_pp_core_init(struct lima_pp_core *core);
 void lima_pp_core_fini(struct lima_pp_core *core);
 int lima_pp_init(struct lima_pp *pp);
 void lima_pp_fini(struct lima_pp *pp);
-
-int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
-			   u32 size, u32 flags, u32 *handle);
-void lima_gem_free_object(struct drm_gem_object *obj);
-int lima_gem_object_open(struct drm_gem_object *obj, struct drm_file *file);
-void lima_gem_object_close(struct drm_gem_object *obj, struct drm_file *file);
-int lima_gem_mmap_offset(struct drm_file *file, u32 handle, u64 *offset);
-int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma);
-int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va);
-int lima_gem_va_unmap(struct drm_file *file, u32 handle, u32 va);
-int lima_gem_submit(struct drm_file *file, struct lima_submit *submit);
-int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns);
-struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
-						      struct dma_buf_attachment *attach,
-						      struct sg_table *sgt);
-struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj);
-struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj);
 
 unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
 

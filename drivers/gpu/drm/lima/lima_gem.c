@@ -1,46 +1,75 @@
 #include <drm/drmP.h>
-#include <drm/drm_gem.h>
-#include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
-#include <linux/reservation.h>
 
 #include "lima.h"
+#include "lima_gem.h"
 
-struct lima_bo_va {
-	struct list_head list;
-	unsigned ref_count;
-
-	struct list_head mapping;
-
-	struct lima_vm *vm;
-};
-
-struct lima_bo {
-	struct drm_gem_object gem;
-	dma_addr_t dma_addr;
-	void *cpu_addr;
-
-	struct mutex lock;
-	struct list_head va;
-
-	/* normally (resv == &_resv) except for imported bo's */
-	struct reservation_object *resv;
-	struct reservation_object _resv;
-};
-
-static inline
-struct lima_bo *to_lima_bo(struct drm_gem_object *obj)
+static void lima_bo_shmem_release(struct lima_bo *bo)
 {
-	return container_of(obj, struct lima_bo, gem);
+	if (bo->pages_dma_addr) {
+		int i, npages = bo->gem.size >> PAGE_SHIFT;
+
+		for (i = 0; i < npages; i++) {
+			if (bo->pages_dma_addr[i])
+				dma_unmap_page(bo->gem.dev->dev,
+					       bo->pages_dma_addr[i],
+					       PAGE_SIZE, DMA_BIDIRECTIONAL);
+		}
+
+		kfree(bo->pages_dma_addr);
+	}
+
+	if (bo->pages)
+		drm_gem_put_pages(&bo->gem, bo->pages, true, true);
 }
 
-static inline
-struct lima_drm_priv *to_lima_drm_priv(struct drm_file *file)
+static int lima_bo_shmem_mmap(struct lima_bo *bo, struct vm_area_struct *vma)
 {
-	return file->driver_priv;
+	pgprot_t prot = vm_get_page_prot(vma->vm_flags);
+
+	/* TODO: is it better to just remap_pfn_range all the pages here? */
+
+	vma->vm_flags |= VM_MIXEDMAP;
+	vma->vm_flags &= ~VM_PFNMAP;
+
+	vma->vm_page_prot = pgprot_writecombine(prot);
+	return 0;
 }
 
-static struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags)
+static struct lima_bo_ops lima_bo_shmem_ops = {
+	.release = lima_bo_shmem_release,
+	.mmap = lima_bo_shmem_mmap,
+};
+
+static void lima_bo_cma_release(struct lima_bo *bo)
+{
+	if (bo->cpu_addr)
+		dma_free_wc(bo->gem.dev->dev, bo->gem.size, bo->cpu_addr,
+			    bo->dma_addr);
+}
+
+static int lima_bo_cma_mmap(struct lima_bo *bo, struct vm_area_struct *vma)
+{
+	int err = 0;
+	unsigned long vm_pgoff = vma->vm_pgoff;
+
+	vma->vm_flags &= ~VM_PFNMAP;
+	vma->vm_pgoff = 0;
+
+	err = dma_mmap_wc(bo->gem.dev->dev, vma, bo->cpu_addr,
+			  bo->dma_addr, bo->gem.size);
+
+	vma->vm_pgoff = vm_pgoff;
+
+	return 0;
+}
+
+static struct lima_bo_ops lima_bo_cma_ops = {
+	.release = lima_bo_cma_release,
+	.mmap = lima_bo_cma_mmap,
+};
+
+struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags)
 {
 	int err;
 	struct lima_bo *bo;
@@ -71,15 +100,60 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 {
 	int err;
 	struct lima_bo *bo;
+	gfp_t mask;
 
 	bo = lima_gem_create_bo(dev, size, flags);
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
-	bo->cpu_addr = dma_alloc_coherent(dev->dev, size, &bo->dma_addr, GFP_USER);
-	if (!bo->cpu_addr) {
-		err = -ENOMEM;
-		goto err_out;
+#if defined(CONFIG_ARM) && !defined(CONFIG_ARM_LPAE)
+	mask = GFP_HIGHUSER;
+#elif defined(CONFIG_ZONE_DMA32)
+	mask = GFP_DMA32;
+#else
+	mask = GFP_DMA;
+#endif
+
+	if (flags & LIMA_GEM_CREATE_CONTIGUOUS) {
+		bo->type = lima_bo_type_cma;
+		bo->ops = &lima_bo_cma_ops;
+
+		bo->cpu_addr = dma_alloc_wc(dev->dev, size, &bo->dma_addr, mask);
+		if (!bo->cpu_addr) {
+			err = -ENOMEM;
+			goto err_out;
+		}
+	}
+	else {
+		int npages, i;
+
+		bo->type = lima_bo_type_shmem;
+		bo->ops = &lima_bo_shmem_ops;
+
+		mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
+		bo->pages = drm_gem_get_pages(&bo->gem);
+		if (IS_ERR(bo->pages)) {
+			err = PTR_ERR(bo->pages);
+			bo->pages = NULL;
+			goto err_out;
+		}
+
+		npages = bo->gem.size >> PAGE_SHIFT;
+		bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
+		if (!bo->pages_dma_addr) {
+			err = -ENOMEM;
+			goto err_out;
+		}
+
+		for (i = 0; i < npages; i++) {
+			dma_addr_t addr = dma_map_page(dev->dev, bo->pages[i], 0,
+						       PAGE_SIZE, DMA_BIDIRECTIONAL);
+			if (dma_mapping_error(dev->dev, addr)) {
+				err = -EFAULT;
+				goto err_out;
+			}
+			bo->pages_dma_addr[i] = addr;
+		}
 	}
 
 	bo->resv = &bo->_resv;
@@ -103,8 +177,7 @@ void lima_gem_free_object(struct drm_gem_object *obj)
 	if (!list_empty(&bo->va))
 		dev_err(obj->dev->dev, "lima gem free bo still has va\n");
 
-	if (!obj->import_attach)
-		dma_free_coherent(obj->dev->dev, obj->size, bo->cpu_addr, bo->dma_addr);
+        bo->ops->release(bo);
 
 	reservation_object_fini(&bo->_resv);
 	drm_gem_object_release(obj);
@@ -208,26 +281,49 @@ int lima_gem_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (err)
 		return err;
 
-	vma->vm_pgoff = 0;
-
 	bo = to_lima_bo(vma->vm_private_data);
-	err = dma_mmap_coherent(bo->gem.dev->dev, vma, bo->cpu_addr,
-				bo->dma_addr, bo->gem.size);
-	if (err) {
-		drm_gem_vm_close(vma);
-		return err;
-	}
 
-	return 0;
+	err = bo->ops->mmap(bo, vma);
+	if (err)
+		drm_gem_vm_close(vma);
+
+	return err;
 }
 
 static int lima_gem_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct lima_bo *bo = to_lima_bo(vma->vm_private_data);
+	unsigned long offset;
+	int err;
 
-	dev_err(bo->gem.dev->dev, "unexpected vm fault %lx\n", vmf->address);
-	return 0;
+	if (!bo->pages)
+		return VM_FAULT_SIGBUS;
+
+	offset = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
+
+	/* TODO:
+	 *   1. use vm_insert_pfn instead of vm_insert_page which
+	 *     will flush dcache (already done when alloc) so is
+	 *     slower than vm_insert_pfn
+	 *   2. insert more pages at once to reduce page fault as
+	 *     GPU buffer will be accessed by CPU continuously and
+	 *     in big blocks
+	 */
+	err = vm_insert_page(vma, vmf->address, bo->pages[offset]);
+	switch (err) {
+	case -EAGAIN:
+	case 0:
+	case -ERESTARTSYS:
+	case -EINTR:
+	case -EBUSY:
+		return VM_FAULT_NOPAGE;
+
+	case -ENOMEM:
+		return VM_FAULT_OOM;
+	}
+
+	return VM_FAULT_SIGBUS;
 }
 
 const struct vm_operations_struct lima_gem_vm_ops = {
@@ -275,11 +371,9 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 	bo_va = lima_gem_find_bo_va(bo, vm);
 	BUG_ON(!bo_va);
 
-	err = lima_vm_map(vm, bo->dma_addr, mapping);
-	if (err) {
-		mutex_unlock(&bo->lock);
+	err = lima_vm_map(vm, bo->pages_dma_addr, bo->dma_addr, mapping);
+	if (err)
 		goto err_out1;
-	}
 
 	list_add_tail(&mapping->list, &bo_va->mapping);
 
@@ -289,6 +383,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 	return 0;
 
 err_out1:
+	mutex_unlock(&bo->lock);
 	kfree(mapping);
 err_out0:
 	drm_gem_object_unreference_unlocked(obj);
@@ -494,50 +589,4 @@ int lima_gem_wait(struct drm_file *file, u32 handle, u32 op, u64 timeout_ns)
 
 	drm_gem_object_unreference_unlocked(obj);
 	return ret;
-}
-
-struct drm_gem_object *lima_gem_prime_import_sg_table(struct drm_device *dev,
-						      struct dma_buf_attachment *attach,
-						      struct sg_table *sgt)
-{
-	struct lima_bo *bo;
-
-	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
-	if (!bo)
-		return ERR_PTR(-ENOMEM);
-
-	bo->cpu_addr = sg_virt(sgt->sgl);
-	bo->dma_addr = sg_dma_address(sgt->sgl);
-	bo->resv = attach->dmabuf->resv;
-
-	return &bo->gem;
-}
-
-struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj)
-{
-        struct lima_bo *bo = to_lima_bo(obj);
-
-	return bo->resv;
-}
-
-struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
-{
-	struct lima_bo *bo = to_lima_bo(obj);
-	struct sg_table *sgt;
-	int ret;
-
-	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
-	if (!sgt)
-		return NULL;
-
-	ret = dma_get_sgtable(obj->dev->dev, sgt, bo->cpu_addr,
-			      bo->dma_addr, obj->size);
-	if (ret < 0)
-		goto out;
-
-	return sgt;
-
-out:
-	kfree(sgt);
-	return NULL;
 }
