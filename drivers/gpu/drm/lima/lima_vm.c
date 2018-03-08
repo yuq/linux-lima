@@ -56,16 +56,17 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
 			vm->pd.cpu[pde] = 0;
 			vm->pd.dma--;
 
-			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
-					  vm->pts[pde].cpu, vm->pts[pde].dma);
+			dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE,
+				    vm->pts[pde].cpu, vm->pts[pde].dma);
 			vm->pts[pde].cpu = 0;
 		}
 	}
 }
 
-int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *mapping)
+int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma, dma_addr_t dma,
+		struct lima_bo_va_mapping *mapping)
 {
-	int err;
+	int err, i = 0;
 	struct lima_bo_va_mapping *it;
 	u32 addr;
 
@@ -81,15 +82,15 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *m
 
 	lima_vm_it_insert(mapping, &vm->va);
 
-	for (addr = mapping->start; addr <= mapping->last;
-	     addr += LIMA_PAGE_SIZE, dma += LIMA_PAGE_SIZE) {
+	for (addr = mapping->start; addr <= mapping->last; addr += LIMA_PAGE_SIZE) {
 		u32 pde = LIMA_PDE(addr);
 		u32 pte = LIMA_PTE(addr);
+		dma_addr_t page_dma_addr;
 
 		if (!vm->pts[pde].cpu) {
-			vm->pts[pde].cpu = dma_alloc_coherent(
-				vm->dev->dev, LIMA_PAGE_SIZE,
-				&vm->pts[pde].dma, GFP_KERNEL);
+			vm->pts[pde].cpu =
+				dma_alloc_wc(vm->dev->dev, LIMA_PAGE_SIZE,
+					     &vm->pts[pde].dma, GFP_KERNEL);
 			if (!vm->pts[pde].cpu) {
 				err = -ENOMEM;
 				goto err_out1;
@@ -103,7 +104,16 @@ int lima_vm_map(struct lima_vm *vm, dma_addr_t dma, struct lima_bo_va_mapping *m
 		 * as a reference count, 12bit is enough for 1024 max count
 		 */
 		vm->pts[pde].dma++;
-		vm->pts[pde].cpu[pte] = dma | LIMA_VM_FLAGS_CACHE;
+
+		if (pages_dma) {
+			page_dma_addr = pages_dma[i];
+			i++;
+		}
+		else {
+			page_dma_addr = dma;
+			dma += LIMA_PAGE_SIZE;
+		}
+		vm->pts[pde].cpu[pte] = page_dma_addr | LIMA_VM_FLAGS_CACHE;
 	}
 
 	mutex_unlock(&vm->lock);
