@@ -45,7 +45,7 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
 {
 	struct drm_lima_gem_create *args = data;
 
-	if (args->flags & ~(LIMA_GEM_CREATE_CONTIGUOUS))
+	if (args->flags)
 		return -EINVAL;
 
 	if (args->size == 0)
