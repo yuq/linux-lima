@@ -47,12 +47,9 @@ struct lima_bo {
 
 	enum lima_bo_type {
 		lima_bo_type_shmem,
-		lima_bo_type_cma,
 		lima_bo_type_dma_buf,
 	} type;
 
-	dma_addr_t dma_addr;
-	void *cpu_addr;
 	struct page **pages;
 	dma_addr_t *pages_dma_addr;	
 	struct sg_table *sgt;
