@@ -53,6 +53,7 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(
 {
 	struct lima_bo *bo;
 	struct drm_gem_object *ret;
+	int err, npages = attach->dmabuf->size >> PAGE_SHIFT;
 
 	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
 	if (!bo)
@@ -62,31 +63,23 @@ struct drm_gem_object *lima_gem_prime_import_sg_table(
 	bo->ops = &lima_bo_dma_buf_ops;
 	bo->sgt = sgt;
 
-	if (sgt->nents == 1) {
-		bo->cpu_addr = sg_virt(sgt->sgl);
-		bo->dma_addr = sg_dma_address(sgt->sgl);
+	bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
+	if (!bo->pages_dma_addr) {
+		ret = ERR_PTR(-ENOMEM);
+		goto err_out;
 	}
-	else {
-		int err, npages = attach->dmabuf->size >> PAGE_SHIFT;
 
-		bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
-		if (!bo->pages_dma_addr) {
-			ret = ERR_PTR(-ENOMEM);
-			goto err_out;
-		}
+	bo->pages = kzalloc(npages * sizeof(*bo->pages), GFP_KERNEL);
+	if (!bo->pages) {
+		ret = ERR_PTR(-ENOMEM);
+		goto err_out;
+	}
 
-		bo->pages = kzalloc(npages * sizeof(*bo->pages), GFP_KERNEL);
-		if (!bo->pages) {
-			ret = ERR_PTR(-ENOMEM);
-			goto err_out;
-		}
-
-		err = drm_prime_sg_to_page_addr_arrays(
-			sgt, bo->pages, bo->pages_dma_addr, npages);
-	        if (err) {
-			ret = ERR_PTR(err);
-			goto err_out;
-		}
+	err = drm_prime_sg_to_page_addr_arrays(
+		sgt, bo->pages, bo->pages_dma_addr, npages);
+	if (err) {
+		ret = ERR_PTR(err);
+		goto err_out;
 	}
 
 	bo->resv = attach->dmabuf->resv;
@@ -108,22 +101,6 @@ struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj)
 struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
 	struct lima_bo *bo = to_lima_bo(obj);
-	struct sg_table *sgt;
-	int ret;
 
-	if (bo->pages)
-		return drm_prime_pages_to_sg(bo->pages, obj->size >> PAGE_SHIFT);
-
-	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
-	if (!sgt)
-		return NULL;
-
-	ret = dma_get_sgtable(obj->dev->dev, sgt, bo->cpu_addr,
-			      bo->dma_addr, obj->size);
-	if (ret < 0) {
-		kfree(sgt);
-		return NULL;
-	}
-
-	return sgt;
+	return drm_prime_pages_to_sg(bo->pages, obj->size >> PAGE_SHIFT);
 }
