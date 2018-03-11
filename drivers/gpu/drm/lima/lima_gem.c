@@ -41,34 +41,6 @@ static struct lima_bo_ops lima_bo_shmem_ops = {
 	.mmap = lima_bo_shmem_mmap,
 };
 
-static void lima_bo_cma_release(struct lima_bo *bo)
-{
-	if (bo->cpu_addr)
-		dma_free_wc(bo->gem.dev->dev, bo->gem.size, bo->cpu_addr,
-			    bo->dma_addr);
-}
-
-static int lima_bo_cma_mmap(struct lima_bo *bo, struct vm_area_struct *vma)
-{
-	int err = 0;
-	unsigned long vm_pgoff = vma->vm_pgoff;
-
-	vma->vm_flags &= ~VM_PFNMAP;
-	vma->vm_pgoff = 0;
-
-	err = dma_mmap_wc(bo->gem.dev->dev, vma, bo->cpu_addr,
-			  bo->dma_addr, bo->gem.size);
-
-	vma->vm_pgoff = vm_pgoff;
-
-	return 0;
-}
-
-static struct lima_bo_ops lima_bo_cma_ops = {
-	.release = lima_bo_cma_release,
-	.mmap = lima_bo_cma_mmap,
-};
-
 struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags)
 {
 	int err;
@@ -98,7 +70,7 @@ err_out0:
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 			   u32 size, u32 flags, u32 *handle)
 {
-	int err;
+	int err, npages, i;
 	struct lima_bo *bo;
 	gfp_t mask;
 
@@ -114,46 +86,32 @@ int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,
 	mask = GFP_DMA;
 #endif
 
-	if (flags & LIMA_GEM_CREATE_CONTIGUOUS) {
-		bo->type = lima_bo_type_cma;
-		bo->ops = &lima_bo_cma_ops;
+	bo->type = lima_bo_type_shmem;
+	bo->ops = &lima_bo_shmem_ops;
 
-		bo->cpu_addr = dma_alloc_wc(dev->dev, size, &bo->dma_addr, mask);
-		if (!bo->cpu_addr) {
-			err = -ENOMEM;
-			goto err_out;
-		}
+	mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
+	bo->pages = drm_gem_get_pages(&bo->gem);
+	if (IS_ERR(bo->pages)) {
+		err = PTR_ERR(bo->pages);
+		bo->pages = NULL;
+		goto err_out;
 	}
-	else {
-		int npages, i;
 
-		bo->type = lima_bo_type_shmem;
-		bo->ops = &lima_bo_shmem_ops;
+	npages = bo->gem.size >> PAGE_SHIFT;
+	bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
+	if (!bo->pages_dma_addr) {
+		err = -ENOMEM;
+		goto err_out;
+	}
 
-		mapping_set_gfp_mask(bo->gem.filp->f_mapping, mask);
-		bo->pages = drm_gem_get_pages(&bo->gem);
-		if (IS_ERR(bo->pages)) {
-			err = PTR_ERR(bo->pages);
-			bo->pages = NULL;
+	for (i = 0; i < npages; i++) {
+		dma_addr_t addr = dma_map_page(dev->dev, bo->pages[i], 0,
+					       PAGE_SIZE, DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(dev->dev, addr)) {
+			err = -EFAULT;
 			goto err_out;
 		}
-
-		npages = bo->gem.size >> PAGE_SHIFT;
-		bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
-		if (!bo->pages_dma_addr) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-
-		for (i = 0; i < npages; i++) {
-			dma_addr_t addr = dma_map_page(dev->dev, bo->pages[i], 0,
-						       PAGE_SIZE, DMA_BIDIRECTIONAL);
-			if (dma_mapping_error(dev->dev, addr)) {
-				err = -EFAULT;
-				goto err_out;
-			}
-			bo->pages_dma_addr[i] = addr;
-		}
+		bo->pages_dma_addr[i] = addr;
 	}
 
 	bo->resv = &bo->_resv;
@@ -371,7 +329,7 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 	bo_va = lima_gem_find_bo_va(bo, vm);
 	BUG_ON(!bo_va);
 
-	err = lima_vm_map(vm, bo->pages_dma_addr, bo->dma_addr, mapping);
+	err = lima_vm_map(vm, bo->pages_dma_addr, mapping);
 	if (err)
 		goto err_out1;
 
