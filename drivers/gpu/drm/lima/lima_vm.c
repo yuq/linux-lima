@@ -152,7 +152,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 	mutex_init(&vm->lock);
 	kref_init(&vm->refcount);
 
-	vm->pd.cpu = dma_alloc_coherent(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
+	vm->pd.cpu = dma_alloc_wc(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
 	if (!vm->pd.cpu)
 		goto err_out;
 	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
@@ -183,15 +183,15 @@ void lima_vm_release(struct kref *kref)
 
 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
 		if (vm->pts[i].cpu) {
-			dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE,
-					  vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
+			dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE,
+				    vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
 			vm->pd.dma--;
 		}
 	}
 
 	if (vm->pd.cpu)
-		dma_free_coherent(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
-				  vm->pd.dma & ~LIMA_PAGE_MASK);
+		dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
+			    vm->pd.dma & ~LIMA_PAGE_MASK);
 
 	kvfree(vm);
 }
