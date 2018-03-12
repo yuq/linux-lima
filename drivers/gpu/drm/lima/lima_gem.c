@@ -1,5 +1,6 @@
 #include <drm/drmP.h>
 #include <linux/dma-mapping.h>
+#include <linux/pagemap.h>
 
 #include "lima.h"
 #include "lima_gem.h"
