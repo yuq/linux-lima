@@ -210,10 +210,12 @@ void lima_vm_print(struct lima_vm *vm)
 		if (vm->pd.cpu[i]) {
 			printk(KERN_INFO "lima vm pd %03x:%08x\n", i, vm->pd.cpu[i]);
 			if ((vm->pd.cpu[i] & ~LIMA_VM_FLAG_MASK) != vm->pts[i].dma)
-				printk(KERN_INFO "pd %x not match pt %x\n", i, vm->pts[i].dma);
+				printk(KERN_INFO "pd %x not match pt %x\n",
+				       i, (u32)vm->pts[i].dma);
 			for (j = 0; j < LIMA_PAGE_ENT_NUM; j++) {
 				if (vm->pts[i].cpu[j])
-					printk(KERN_INFO "  pt %03x:%08x\n", j, vm->pts[i].cpu[j]);
+					printk(KERN_INFO "  pt %03x:%08x\n",
+					       j, vm->pts[i].cpu[j]);
 			}
 		}
 	}
