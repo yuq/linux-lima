@@ -96,6 +96,10 @@
 			clocks = <&ccu CLK_BUS_GPU>, <&ccu CLK_GPU>;
 			clock-names = "bus", "core";
 			resets = <&ccu RST_BUS_GPU>;
+
+			assigned-clocks = <&ccu CLK_GPU>;
+			assigned-clock-parents = <0>;
+			assigned-clock-rates = <576000000>;
 		};
 	};
 };
