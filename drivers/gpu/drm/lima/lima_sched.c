@@ -71,6 +71,21 @@ static const struct dma_fence_ops lima_fence_ops = {
 	.release = lima_fence_release,
 };
 
+static struct lima_fence *lima_fence_create(struct lima_sched_pipe *pipe)
+{
+	struct lima_fence *fence;
+
+	fence = kmem_cache_zalloc(lima_fence_slab, GFP_KERNEL);
+	if (!fence)
+	       return NULL;
+
+	fence->pipe = pipe;
+	dma_fence_init(&fence->base, &lima_fence_ops, &pipe->fence_lock,
+		       pipe->fence_context, ++pipe->fence_seqno);
+
+	return fence;
+}
+
 static inline struct lima_sched_task *to_lima_task(struct drm_sched_job *job)
 {
 	return container_of(job, struct lima_sched_task, base);
@@ -85,34 +100,20 @@ int lima_sched_task_init(struct lima_sched_task *task,
 			 struct lima_sched_context *context,
 			 struct lima_vm *vm)
 {
-	struct lima_fence *fence;
 	int err;
-
-	fence = kmem_cache_zalloc(lima_fence_slab, GFP_KERNEL);
-	if (!fence)
-	       return -ENOMEM;
 
 	err = drm_sched_job_init(&task->base, context->base.sched,
 				 &context->base, context);
 	if (err)
-		goto err_out0;
+		return err;
 
 	task->vm = lima_vm_get(vm);
-	task->fence = &fence->base;
 	return 0;
-
-err_out0:
-	kmem_cache_free(lima_fence_slab, fence);
-	return err;
 }
 
 void lima_sched_task_fini(struct lima_sched_task *task)
 {
-	struct lima_fence *fence = to_lima_fence(task->fence);
-	kmem_cache_free(lima_fence_slab, fence);
-
 	dma_fence_put(&task->base.s_fence->finished);
-
 	lima_vm_put(task->vm);
 }
 
@@ -308,7 +309,7 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 {
 	struct lima_sched_task *task = to_lima_task(job);
 	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
-	struct lima_fence *fence = to_lima_fence(task->fence);
+	struct lima_fence *fence;
 	struct dma_fence *ret;
 	int i;
 
@@ -316,9 +317,10 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	if (job->s_fence->finished.error < 0)
 		return NULL;
 
-	fence->pipe = pipe;
-	dma_fence_init(task->fence, &lima_fence_ops, &pipe->fence_lock,
-		       pipe->fence_context, ++pipe->fence_seqno);
+	fence = lima_fence_create(pipe);
+	if (!fence)
+		return NULL;
+	task->fence = &fence->base;
 
 	/* for caller usage of the fence, otherwise irq handler 
 	 * may consume the fence before caller use it */
@@ -393,7 +395,6 @@ static void lima_sched_free_job(struct drm_sched_job *job)
 		kfree(task->dep);
 
 	lima_vm_put(task->vm);
-
 	kmem_cache_free(pipe->task_slab, task);
 }
 
