@@ -295,11 +295,22 @@ int lima_device_init(struct lima_device *ldev)
 	}
 
 	/* pmu is optional and not always present */
-	if ((err = lima_init_ip(ldev, "pmu", &ldev->pmu->ip, LIMA_PMU_BASE)) ||
-	    (err = lima_pmu_init(ldev->pmu))) {
+	if (lima_init_ip(ldev, "pmu", &ldev->pmu->ip, LIMA_PMU_BASE)) {
 		dev_info(ldev->dev, "no PMU present\n");
 		kfree(ldev->pmu);
 		ldev->pmu = NULL;
+	}
+	else {
+		/* If this value is too low, when in high GPU clk freq,
+		 * GPU will be in unstable state. */
+		if (of_property_read_u32(np, "switch-delay", &ldev->pmu->switch_delay))
+			ldev->pmu->switch_delay = 0xff;
+
+		if ((err = lima_pmu_init(ldev->pmu))) {
+			kfree(ldev->pmu);
+			ldev->pmu = NULL;
+			goto err_out;
+		}
 	}
 
 	if (ldev->gpu_type != GPU_MALI450) {
