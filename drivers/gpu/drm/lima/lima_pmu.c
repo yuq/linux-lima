@@ -52,7 +52,7 @@ int lima_pmu_init(struct lima_pmu *pmu)
 	struct lima_device *dev = pmu->ip.dev;
 
 	pmu_write(INT_MASK, 0);
-	pmu_write(SW_DELAY, 0xff);
+	pmu_write(SW_DELAY, pmu->switch_delay);
 
 	/* status reg 1=off 0=on */
 	stat = pmu_read(STATUS);
