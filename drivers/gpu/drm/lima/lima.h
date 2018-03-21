@@ -50,6 +50,7 @@ struct lima_ip {
 
 struct lima_pmu {
 	struct lima_ip ip;
+	uint32_t switch_delay;
 };
 
 struct lima_l2_cache {
