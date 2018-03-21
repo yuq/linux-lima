@@ -57,6 +57,10 @@ Optional properties:
     A power domain consumer specifier as defined in
     Documentation/devicetree/bindings/power/power_domain.txt
 
+  - switch-delay:
+    This value is the number of Mali clock cycles it takes to
+    enable the power gates and turn on the power mesh.
+
 Vendor-specific bindings
 ------------------------
 
