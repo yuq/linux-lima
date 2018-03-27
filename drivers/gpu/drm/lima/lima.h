@@ -98,6 +98,14 @@ struct lima_pp {
 
 #define LIMA_MAX_PIPE 2
 
+struct lima_dlbu {
+	struct lima_ip ip;
+};
+
+struct lima_bcast {
+	struct lima_ip ip;
+};
+
 struct lima_device {
 	struct device *dev;
 	struct drm_device *ddev;
@@ -120,6 +128,9 @@ struct lima_device {
 	struct lima_gp *gp;
 	struct lima_pp *pp;
 	int num_pp;
+
+	struct lima_dlbu *dlbu;
+	struct lima_bcast *bcast;
 
 	struct lima_vm *empty_vm;
 };

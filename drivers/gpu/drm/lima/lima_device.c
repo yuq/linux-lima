@@ -4,6 +4,8 @@
 #include <linux/dma-mapping.h>
 
 #include "lima.h"
+#include "lima_dlbu.h"
+#include "lima_bcast.h"
 
 #define LIMA_GP_BASE           0x0000
 #define LIMA_L2_BASE           0x1000
@@ -313,7 +315,33 @@ int lima_device_init(struct lima_device *ldev)
 		}
 	}
 
-	if (ldev->gpu_type != GPU_MALI450) {
+	if (ldev->gpu_type == GPU_MALI450) {
+		ldev->dlbu = kzalloc(sizeof(*ldev->dlbu), GFP_KERNEL);
+		if (!ldev->dlbu) {
+			err = -ENOMEM;
+			goto err_out;
+		}
+		ldev->dlbu->ip.irq = -1;
+		if ((err = lima_init_ip(ldev, "dlbu", &ldev->dlbu->ip, LIMA_DLBU_BASE)) ||
+		    (err = lima_dlbu_init(ldev->dlbu))) {
+			kfree(ldev->dlbu);
+			ldev->dlbu = NULL;
+			goto err_out;
+		}
+
+	        ldev->bcast = kzalloc(sizeof(*ldev->bcast), GFP_KERNEL);
+		if (!ldev->bcast) {
+			err = -ENOMEM;
+			goto err_out;
+		}
+		if ((err = lima_init_ip(ldev, "pp", &ldev->bcast->ip, LIMA_BCAST_BASE)) ||
+		    (err = lima_bcast_init(ldev->bcast))) {
+			kfree(ldev->bcast);
+			ldev->bcast = NULL;
+			goto err_out;
+		}
+	}
+	else {
 		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
 		if (!ldev->l2_cache) {
 			err = -ENOMEM;
@@ -376,6 +404,16 @@ void lima_device_fini(struct lima_device *ldev)
 		}
 
 		kfree(ldev->gp);
+	}
+
+	if (ldev->bcast) {
+		lima_bcast_fini(ldev->bcast);
+		kfree(ldev->bcast);
+	}
+
+	if (ldev->dlbu) {
+		lima_dlbu_fini(ldev->dlbu);
+		kfree(ldev->dlbu);
 	}
 
 	if (ldev->l2_cache) {
