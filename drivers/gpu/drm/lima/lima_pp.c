@@ -98,8 +98,8 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 	if (state & LIMA_PP_IRQ_MASK_ERROR) {
 		u32 status = pp_read(STATUS);
 
-		dev_info(dev->dev, "pp error irq state=%x status=%x\n",
-			 state, status);
+		dev_err(dev->dev, "pp error irq state=%x status=%x\n",
+			state, status);
 
 		task_done = true;
 		pp->error = true;
