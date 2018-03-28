@@ -310,8 +310,8 @@ int lima_gem_va_map(struct drm_file *file, u32 handle, u32 flags, u32 va)
 
 	bo = to_lima_bo(obj);
 
-	/* overflow */
-	if (va + obj->size < va) {
+	/* carefully handle overflow when calculate range */
+	if (va < vm->dev->va_start || vm->dev->va_end - obj->size < va) {
 		err = -EINVAL;
 		goto err_out0;
 	}

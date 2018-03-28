@@ -38,6 +38,8 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
 		return -ENODEV;
 	}
 	info->num_pp = ldev->pp->num_core;
+	info->va_start = ldev->va_start;
+	info->va_end = ldev->va_end;
 	return 0;
 }
 
