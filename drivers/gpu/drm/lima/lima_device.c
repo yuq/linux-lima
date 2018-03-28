@@ -271,6 +271,8 @@ int lima_device_init(struct lima_device *ldev)
 		err = -ENOMEM;
 		goto err_out;
 	}
+	ldev->va_start = 0;
+	ldev->va_end = 0x100000000;
 
 	res = platform_get_resource(ldev->pdev, IORESOURCE_MEM, 0);
 	ldev->iomem = devm_ioremap_resource(ldev->dev, res);

@@ -133,6 +133,8 @@ struct lima_device {
 	struct lima_bcast *bcast;
 
 	struct lima_vm *empty_vm;
+	uint64_t va_start;
+	uint64_t va_end;
 };
 
 struct lima_ctx {
