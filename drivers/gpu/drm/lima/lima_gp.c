@@ -115,8 +115,8 @@ static irqreturn_t lima_gp_irq_handler(int irq, void *data)
 	if (state & LIMA_GP_IRQ_MASK_ERROR) {
 		u32 status = gp_read(STATUS);
 
-		dev_info(dev->dev, "gp error irq state=%x status=%x\n",
-			 state, status);
+		dev_err(dev->dev, "gp error irq state=%x status=%x\n",
+			state, status);
 
 		fail = true;
 		task_done = true;

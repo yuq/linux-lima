@@ -59,15 +59,15 @@ static irqreturn_t lima_mmu_irq_handler(int irq, void *data)
 
 	if (status & LIMA_MMU_INT_PAGE_FAULT) {
 		u32 fault = mmu_read(PAGE_FAULT_ADDR);
-		dev_info(dev->dev, "mmu page fault at 0x%x from bus id %d of type %s on %s\n",
-			 fault, LIMA_MMU_STATUS_BUS_ID(status),
-			 status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
-			 mmu->ip.name);
+		dev_err(dev->dev, "mmu page fault at 0x%x from bus id %d of type %s on %s\n",
+			fault, LIMA_MMU_STATUS_BUS_ID(status),
+			status & LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE ? "write" : "read",
+			mmu->ip.name);
 		//lima_vm_print(mmu->vm);
 	}
 
 	if (status & LIMA_MMU_INT_READ_BUS_ERROR) {
-		dev_info(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
+		dev_err(dev->dev, "mmu %s irq bus error\n", mmu->ip.name);
 	}
 
 	/* mask all interrupts before resume */
