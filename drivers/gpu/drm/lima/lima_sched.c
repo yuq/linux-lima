@@ -258,7 +258,7 @@ uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
 int lima_sched_context_wait_fence(struct lima_sched_context *context,
 				  u32 fence, u64 timeout_ns)
 {
-	int ret;
+	signed long ret;
 	struct dma_fence *f = lima_sched_context_get_fence(context, fence);
 
 	if (IS_ERR(f))
@@ -271,9 +271,12 @@ int lima_sched_context_wait_fence(struct lima_sched_context *context,
 	else {
 		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
 
+		/* must use long for result check because in 64bit arch int
+		 * will overflow if timeout is too large and get <0 result
+		 */
 		ret = dma_fence_wait_timeout(f, true, timeout);
 		if (ret == 0)
-			ret = -ETIMEDOUT;
+			ret = timeout ? -ETIMEDOUT : -EBUSY;
 		else if (ret > 0)
 			ret = 0;
 	}
