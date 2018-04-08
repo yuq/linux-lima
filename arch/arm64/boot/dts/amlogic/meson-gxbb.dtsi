@@ -278,6 +278,7 @@
 			"pp2", "ppmmu2";
 		clocks = <&clkc CLKID_CLK81>, <&clkc CLKID_MALI>;
 		clock-names = "bus", "core";
+		switch-delay = <0xffff>;
 
 		/*
 		 * Mali clocking is provided by two identical clock paths
