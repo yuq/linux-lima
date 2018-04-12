@@ -39,17 +39,17 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
 			goto err_out0;
 	}
 
+	idr_preload(GFP_KERNEL);
 	spin_lock(&mgr->lock);
-	err = idr_alloc(&mgr->handles, ctx, 1, 0, GFP_KERNEL);
-	if (err < 0)
-		goto err_out1;
+	err = idr_alloc(&mgr->handles, ctx, 1, 0, GFP_ATOMIC);
 	spin_unlock(&mgr->lock);
+	idr_preload_end();
+	if (err < 0)
+		goto err_out0;
 
 	*id = err;
 	return 0;
 
-err_out1:
-	spin_unlock(&mgr->lock);
 err_out0:
 	for (i--; i >= 0; i--)
 		lima_sched_context_fini(dev->pipe[i], ctx->context + i);
