@@ -63,8 +63,13 @@ static int lima_l2_cache_wait_idle(struct lima_ip *ip)
 
 int lima_l2_cache_flush(struct lima_ip *ip)
 {
+	int ret;
+
+	spin_lock(&ip->data.lock);
 	l2_cache_write(COMMAND, LIMA_L2_CACHE_COMMAND_CLEAR_ALL);
-	return lima_l2_cache_wait_idle(ip);
+	ret = lima_l2_cache_wait_idle(ip);
+	spin_unlock(&ip->data.lock);
+	return ret;
 }
 
 int lima_l2_cache_init(struct lima_ip *ip)
@@ -82,6 +87,8 @@ int lima_l2_cache_init(struct lima_ip *ip)
 		if (i > lima_ip_pp7)
 			return -ENODEV;
 	}
+
+	spin_lock_init(&ip->data.lock);
 
 	size = l2_cache_read(SIZE);
 	dev_info(dev->dev, "l2 cache %uK, %u-way, %ubyte cache line, %ubit external bus\n",
