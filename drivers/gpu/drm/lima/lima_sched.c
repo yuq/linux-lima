@@ -1,6 +1,33 @@
-#include <linux/kthread.h>
+/*
+ * Copyright (C) 2018 Lima Project
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 
-#include "lima.h"
+#include <linux/kthread.h>
+#include <linux/slab.h>
+
+#include "lima_drv.h"
+#include "lima_sched.h"
+#include "lima_vm.h"
+#include "lima_mmu.h"
+#include "lima_l2_cache.h"
 
 struct lima_fence {
 	struct dma_fence base;
@@ -314,6 +341,7 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	struct lima_sched_pipe *pipe = to_lima_pipe(job->sched);
 	struct lima_fence *fence;
 	struct dma_fence *ret;
+	struct lima_vm *vm = NULL, *last_vm = NULL;
 	int i;
 
 	/* after GPU reset */
@@ -341,17 +369,23 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	 * 3. can we reduce the calling of this function because all
 	 *    GP/PP use the same L2 cache
 	 */
-	if (pipe->mmu[0]->ip.dev->gpu_type == GPU_MALI450) {
-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->gp->l2_cache);
-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->pp->l2_cache);
-	} else {
-		lima_l2_cache_flush(pipe->mmu[0]->ip.dev->l2_cache);
+	for (i = 0; i < pipe->num_l2_cache; i++)
+		lima_l2_cache_flush(pipe->l2_cache[i]);
+
+	if (task->vm != pipe->current_vm) {
+		vm = lima_vm_get(task->vm);
+		last_vm = pipe->current_vm;
+		pipe->current_vm = task->vm;
 	}
 
 	for (i = 0; i < pipe->num_mmu; i++)
-		lima_mmu_switch_vm(pipe->mmu[i], task->vm, false);
+		lima_mmu_switch_vm(pipe->mmu[i], vm);
 
-	pipe->task_run(pipe->data, task);
+	if (last_vm)
+		lima_vm_put(last_vm);
+
+	pipe->error = false;
+	pipe->task_run(pipe, task);
 
 	return task->fence;
 }
@@ -364,10 +398,16 @@ static void lima_sched_handle_error_task(struct lima_sched_pipe *pipe,
 	kthread_park(pipe->base.thread);
 	drm_sched_hw_job_reset(&pipe->base, &task->base);
 
-	pipe->task_error(pipe->data);
+	pipe->task_error(pipe);
 
 	for (i = 0; i < pipe->num_mmu; i++)
 		lima_mmu_page_fault_resume(pipe->mmu[i]);
+
+	if (pipe->current_vm)
+		lima_vm_put(pipe->current_vm);
+
+	pipe->current_vm = NULL;
+	pipe->current_task = NULL;
 
 	drm_sched_job_recovery(&pipe->base);
 	kthread_unpark(pipe->base.thread);
@@ -460,14 +500,14 @@ unsigned long lima_timeout_to_jiffies(u64 timeout_ns)
 	return timeout_jiffies;
 }
 
-void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error)
+void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe)
 {
-	if (error)
+	if (pipe->error)
 	        schedule_work(&pipe->error_work);
 	else {
 		struct lima_sched_task *task = pipe->current_task;
 
-		pipe->task_fini(pipe->data);
+		pipe->task_fini(pipe);
 		dma_fence_signal(task->fence);
 	}
 }

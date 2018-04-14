@@ -1,31 +1,99 @@
+/*
+ * Copyright (C) 2018 Lima Project
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
+#include <linux/platform_device.h>
 
-#include "lima.h"
+#include "lima_device.h"
+#include "lima_gp.h"
+#include "lima_pp.h"
+#include "lima_mmu.h"
+#include "lima_pmu.h"
+#include "lima_l2_cache.h"
 #include "lima_dlbu.h"
 #include "lima_bcast.h"
+#include "lima_vm.h"
 
-#define LIMA_GP_BASE           0x0000
-#define LIMA_L2_BASE           0x1000
-#define LIMA_PMU_BASE          0x2000
-#define LIMA_GPMMU_BASE        0x3000
-#define LIMA_PPMMU_BASE(i)     ((i < 4) ? 0x4000 + 0x1000 * (i) : \
-					  0x1C000 + 0x1000 * (i - 4))
-#define LIMA_PP_BASE(i)        ((i < 4) ? 0x8000 + 0x2000 * (i) : \
-					  0x28000 + 0x2000 * (i - 4))
+struct lima_ip_desc {
+	char *name;
+	char *irq_name;
+	bool must_have[lima_gpu_num];
+	int offset[lima_gpu_num];
 
-/* Separate L2-caches per group on Mali450 */
-#define LIMA450_GPL2_BASE      0x10000
-#define LIMA450_PP03L2_BASE    0x01000
-#define LIMA450_PP47L2_BASE    0x11000
+	int (*init)(struct lima_ip *);
+	void (*fini)(struct lima_ip *);
+};
 
-#define LIMA_BCAST_BASE        0x13000
-#define LIMA_PPBCAST_BASE      0x16000
-#define LIMA_PPBCASTMMU_BASE   0x15000
-#define LIMA_DLBU_BASE         0x14000
-#define LIMA_DMA_BASE          0x12000
+#define LIMA_IP_DESC(ipname, mst0, mst1, off0, off1, func, irq) \
+	[lima_ip_##ipname] = { \
+		.name = #ipname, \
+		.irq_name = irq, \
+		.must_have = { \
+			[lima_gpu_mali400] = mst0, \
+			[lima_gpu_mali450] = mst1, \
+		}, \
+		.offset = { \
+			[lima_gpu_mali400] = off0, \
+			[lima_gpu_mali450] = off1, \
+		}, \
+		.init = lima_##func##_init, \
+		.fini = lima_##func##_fini, \
+	}
+
+static struct lima_ip_desc lima_ip_desc[lima_ip_num] = {
+	LIMA_IP_DESC(pmu,         false, false, 0x02000, 0x02000, pmu,      "pmu"),
+	LIMA_IP_DESC(l2_cache0,   true,  true,  0x01000, 0x10000, l2_cache, NULL),
+	LIMA_IP_DESC(l2_cache1,   false, true,  -1,      0x01000, l2_cache, NULL),
+	LIMA_IP_DESC(l2_cache2,   false, false, -1,      0x11000, l2_cache, NULL),
+	LIMA_IP_DESC(gp,          true,  true,  0x00000, 0x00000, gp,       "gp"),
+	LIMA_IP_DESC(pp0,         true,  true,  0x08000, 0x08000, pp,       "pp0"),
+	LIMA_IP_DESC(pp1,         false, false, 0x0A000, 0x0A000, pp,       "pp1"),
+	LIMA_IP_DESC(pp2,         false, false, 0x0C000, 0x0C000, pp,       "pp2"),
+	LIMA_IP_DESC(pp3,         false, false, 0x0E000, 0x0E000, pp,       "pp3"),
+	LIMA_IP_DESC(pp4,         false, false, -1,      0x28000, pp,       "pp4"),
+	LIMA_IP_DESC(pp5,         false, false, -1,      0x2A000, pp,       "pp5"),
+	LIMA_IP_DESC(pp6,         false, false, -1,      0x2C000, pp,       "pp6"),
+	LIMA_IP_DESC(pp7,         false, false, -1,      0x2D000, pp,       "pp7"),
+	LIMA_IP_DESC(gpmmu,       true,  true,  0x03000, 0x03000, mmu,      "gpmmu"),
+	LIMA_IP_DESC(ppmmu0,      true,  true,  0x04000, 0x04000, mmu,      "ppmmu0"),
+	LIMA_IP_DESC(ppmmu1,      false, false, 0x05000, 0x05000, mmu,      "ppmmu1"),
+	LIMA_IP_DESC(ppmmu2,      false, false, 0x06000, 0x06000, mmu,      "ppmmu2"),
+	LIMA_IP_DESC(ppmmu3,      false, false, 0x07000, 0x07000, mmu,      "ppmmu3"),
+	LIMA_IP_DESC(ppmmu4,      false, false, -1,      0x1C000, mmu,      "ppmmu4"),
+	LIMA_IP_DESC(ppmmu5,      false, false, -1,      0x1D000, mmu,      "ppmmu5"),
+	LIMA_IP_DESC(ppmmu6,      false, false, -1,      0x1E000, mmu,      "ppmmu6"),
+	LIMA_IP_DESC(ppmmu7,      false, false, -1,      0x1F000, mmu,      "ppmmu7"),
+	LIMA_IP_DESC(dlbu,        false, true,  -1,      0x14000, dlbu,     NULL),
+	LIMA_IP_DESC(bcast,       false, true,  -1,      0x13000, bcast,    NULL),
+	LIMA_IP_DESC(pp_bcast,    false, true,  -1,      0x16000, pp,       "pp"),
+	LIMA_IP_DESC(ppmmu_bcast, false, true,  -1,      0x15000, mmu,      NULL),
+};
+
+const char *lima_ip_name(struct lima_ip *ip)
+{
+	return lima_ip_desc[ip->id].name;
+}
 
 static int lima_clk_init(struct lima_device *dev)
 {
@@ -109,152 +177,122 @@ static void lima_regulator_fini(struct lima_device *dev)
 		regulator_disable(dev->regulator);
 }
 
-
-static int lima_init_ip(struct lima_device *dev, const char *name,
-			struct lima_ip *ip, u32 offset)
+static int lima_init_ip(struct lima_device *dev, int index)
 {
-	ip->iomem = dev->iomem + offset;
-	ip->dev = dev;
-
-	strncpy(ip->name, name, LIMA_IP_MAX_NAME_LEN);
-	ip->name[LIMA_IP_MAX_NAME_LEN - 1] = '\0';
-
-	if (ip->irq == 0) {
-		ip->irq = platform_get_irq_byname(dev->pdev, name);
-		if (ip->irq < 0) {
-			dev_err(dev->dev, "fail to get irq %s\n", name);
-			return ip->irq;
-		}
-	}
-
-	return 0;
-}
-
-static int lima_gp_group_init(struct lima_device *dev)
-{
+	struct lima_ip_desc *desc = lima_ip_desc + index;
+	struct lima_ip *ip = dev->ip + index;
+	int offset = desc->offset[dev->id];
+	bool must = desc->must_have[dev->id];
 	int err;
-	struct lima_gp *gp;
 
-	gp = kzalloc(sizeof(*gp), GFP_KERNEL);
-	if (!gp)
-		return -ENOMEM;
+	if (offset < 0)
+		return 0;
 
-	/* Init GP-group L2 cache on Mali450 */
-	if (dev->gpu_type == GPU_MALI450) {
-		gp->l2_cache = kzalloc(sizeof(*gp->l2_cache), GFP_KERNEL);
-		if (!gp->l2_cache) {
-			err = -ENOMEM;
-			goto err_out0;
-		}
-		gp->l2_cache->ip.irq = -1;
-		if ((err = lima_init_ip(dev, "gp-l2-cache", &gp->l2_cache->ip, LIMA450_GPL2_BASE)) ||
-		    (err = lima_l2_cache_init(gp->l2_cache))) {
-			goto err_out1;
-		}
+	ip->dev = dev;
+	ip->id = index;
+	ip->iomem = dev->iomem + offset;
+	if (desc->irq_name) {
+		err = platform_get_irq_byname(dev->pdev, desc->irq_name);
+		if (err < 0)
+			goto out;
+		ip->irq = err;
 	}
 
-	if ((err = lima_init_ip(dev, "gpmmu", &gp->mmu.ip, LIMA_GPMMU_BASE)) ||
-	    (err = lima_mmu_init(&gp->mmu)))
-		goto err_out1;
+	err = desc->init(ip);
+	if (!err) {
+		ip->present = true;
+		return 0;
+	}
 
-	if ((err = lima_init_ip(dev, "gp", &gp->ip, LIMA_GP_BASE)) ||
-	    (err = lima_gp_init(gp)))
-		goto err_out2;
-
-	if ((err = lima_sched_pipe_init(&gp->pipe, gp->ip.name)))
-		goto err_out3;
-
-	dev->pipe[LIMA_PIPE_GP] = &gp->pipe;
-	gp->mmu.pipe = &gp->pipe;
-	dev->gp = gp;
-	return 0;
-
-err_out3:
-	lima_gp_fini(gp);
-err_out2:
-	lima_mmu_fini(&gp->mmu);
-err_out1:
-	if (gp->l2_cache)
-		lima_l2_cache_fini(gp->l2_cache);
-err_out0:
-	if (gp->l2_cache)
-		kfree(gp->l2_cache);
-	kfree(gp);
-	return err;
+out:
+	return must ? err : 0;
 }
 
-static int lima_pp_group_init(struct lima_device *dev)
+static void lima_fini_ip(struct lima_device *ldev, int index)
 {
-	int err, i;
-	struct lima_pp *pp;
-	char pp_name[] = "pp0", pp_mmu_name[] = "ppmmu0";
+	struct lima_ip_desc *desc = lima_ip_desc + index;
+	struct lima_ip *ip = ldev->ip + index;
 
-	pp = kzalloc(sizeof(*pp), GFP_KERNEL);
-	if (!pp)
-		return -ENOMEM;
-	dev->pp = pp;
+	if (ip->present)
+		desc->fini(ip);
+}
 
-	/* Init PP-group L2 cache on Mali450 */
-	if (dev->gpu_type == GPU_MALI450) {
-		pp->l2_cache = kzalloc(sizeof(*pp->l2_cache), GFP_KERNEL);
-		if (!pp->l2_cache)
-			return -ENOMEM;
-		pp->l2_cache->ip.irq = -1;
-		if ((err = lima_init_ip(dev, "pp-l2-cache", &pp->l2_cache->ip, LIMA450_PP03L2_BASE)) ||
-		    (err = lima_l2_cache_init(pp->l2_cache)))
-			return err;
-	}
+static int lima_init_gp_pipe(struct lima_device *dev)
+{
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
+	int err;
 
-	for (i = 0; i < dev->num_pp; i++) {
-		struct lima_pp_core *core = pp->core + pp->num_core;
-
-		pp_name[2] = '0' + i; pp_mmu_name[5] = '0' + i;
-
-		if ((err = lima_init_ip(dev, pp_mmu_name, &core->mmu.ip, LIMA_PPMMU_BASE(i))) ||
-		    (err = lima_mmu_init(&core->mmu))) {
-			memset(core, 0, sizeof(*core));
-			continue;
-		}
-
-		if ((err = lima_init_ip(dev, pp_name, &core->ip, LIMA_PP_BASE(i))) ||
-		    (err = lima_pp_core_init(core))) {
-			lima_mmu_fini(&core->mmu);
-			memset(core, 0, sizeof(*core));
-			continue;
-		}
-
-		pp->num_core++;
-	}
-
-	if (pp->num_core != dev->num_pp)
-		dev_warn(dev->dev, "bringup pp %d/%d\n", pp->num_core, dev->num_pp);
-
-	if (pp->num_core == 0)
-		return -ENODEV;
-
-	if ((err = lima_sched_pipe_init(&pp->pipe, "pp")))
+	if ((err = lima_sched_pipe_init(pipe, "gp")))
 		return err;
 
-	dev->pipe[LIMA_PIPE_PP] = &pp->pipe;
-	for (i = 0; i < pp->num_core; i++)
-		pp->core[i].mmu.pipe = &pp->pipe;
+	pipe->l2_cache[pipe->num_l2_cache++] = dev->ip + lima_ip_l2_cache0;
+	pipe->mmu[pipe->num_mmu++] = dev->ip + lima_ip_gpmmu;
+	pipe->processor[pipe->num_processor++] = dev->ip + lima_ip_gp;
 
-	err = lima_pp_init(pp);
-	if (err)
+	if ((err = lima_gp_pipe_init(dev))) {
+		lima_sched_pipe_fini(pipe);
 		return err;
+	}
 
 	return 0;
+}
+
+static void lima_fini_gp_pipe(struct lima_device *dev)
+{
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
+
+	lima_gp_pipe_fini(dev);
+	lima_sched_pipe_fini(pipe);
+}
+
+static int lima_init_pp_pipe(struct lima_device *dev)
+{
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+	int err, i;
+
+	if ((err = lima_sched_pipe_init(pipe, "pp")))
+		return err;
+
+	for (i = 0; i < LIMA_SCHED_PIPE_MAX_PROCESSOR; i++) {
+		struct lima_ip *pp = dev->ip + lima_ip_pp0 + i;
+		struct lima_ip *ppmmu = dev->ip + lima_ip_ppmmu0 + i;
+		struct lima_ip *l2_cache;
+
+		if (dev->id == lima_gpu_mali400)
+			l2_cache = dev->ip + lima_ip_l2_cache0;
+		else
+			l2_cache = dev->ip + lima_ip_l2_cache1 + (i >> 2);
+
+		if (pp->present && ppmmu->present && l2_cache->present) {
+			pipe->mmu[pipe->num_mmu++] = ppmmu;
+			pipe->processor[pipe->num_processor++] = pp;
+			if (!pipe->l2_cache[i >> 2])
+				pipe->l2_cache[pipe->num_l2_cache++] = l2_cache;
+		}
+	}
+
+	if ((err = lima_pp_pipe_init(dev))) {
+		lima_sched_pipe_fini(pipe);
+		return err;
+	}
+
+	return 0;
+}
+
+static void lima_fini_pp_pipe(struct lima_device *dev)
+{
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+
+	lima_pp_pipe_fini(dev);
+	lima_sched_pipe_fini(pipe);
 }
 
 int lima_device_init(struct lima_device *ldev)
 {
 	int err, i;
-	struct device_node *np;
 	struct resource *res;
 
 	dma_set_coherent_mask(ldev->dev, DMA_BIT_MASK(32));
-
-	np = ldev->dev->of_node;
 
 	err = lima_clk_init(ldev);
 	if (err) {
@@ -263,13 +301,14 @@ int lima_device_init(struct lima_device *ldev)
 	}
 
 	if ((err = lima_regulator_init(ldev))) {
-		return err;
+		dev_err(ldev->dev, "regulator init fail %d\n", err);
+		goto err_out0;
 	}
 
 	ldev->empty_vm = lima_vm_create(ldev);
 	if (!ldev->empty_vm) {
 		err = -ENOMEM;
-		goto err_out;
+		goto err_out1;
 	}
 	ldev->va_start = 0;
 	ldev->va_end = 0x100000000;
@@ -279,95 +318,36 @@ int lima_device_init(struct lima_device *ldev)
 	if (IS_ERR(ldev->iomem)) {
 		dev_err(ldev->dev, "fail to ioremap iomem\n");
 	        err = PTR_ERR(ldev->iomem);
-		goto err_out;
+		goto err_out2;
 	}
 
-	/* Get the number of PPs */
-	for (i = 0; i < LIMA_MAX_PP; i++) {
-		char pp_name[] = "pp0";
-		pp_name[2] = '0' + i;
-		if (platform_get_irq_byname(ldev->pdev, pp_name) < 0)
-			break;
-	}
-	dev_info(ldev->dev, "found %d PPs\n", i);
-	ldev->num_pp = i;
-
-	ldev->pmu = kzalloc(sizeof(*ldev->pmu), GFP_KERNEL);
-	if (!ldev->pmu) {
-		err = -ENOMEM;
-		goto err_out;
+	for (i = 0; i < lima_ip_num; i++) {
+		err = lima_init_ip(ldev, i);
+		if (err)
+			goto err_out3;
 	}
 
-	/* pmu is optional and not always present */
-	if (lima_init_ip(ldev, "pmu", &ldev->pmu->ip, LIMA_PMU_BASE)) {
-		dev_info(ldev->dev, "no PMU present\n");
-		kfree(ldev->pmu);
-		ldev->pmu = NULL;
-	}
-	else {
-		/* If this value is too low, when in high GPU clk freq,
-		 * GPU will be in unstable state. */
-		if (of_property_read_u32(np, "switch-delay", &ldev->pmu->switch_delay))
-			ldev->pmu->switch_delay = 0xff;
+	err = lima_init_gp_pipe(ldev);
+	if (err)
+		goto err_out3;
 
-		if ((err = lima_pmu_init(ldev->pmu))) {
-			kfree(ldev->pmu);
-			ldev->pmu = NULL;
-			goto err_out;
-		}
-	}
-
-	if (ldev->gpu_type == GPU_MALI450) {
-		ldev->dlbu = kzalloc(sizeof(*ldev->dlbu), GFP_KERNEL);
-		if (!ldev->dlbu) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-		ldev->dlbu->ip.irq = -1;
-		if ((err = lima_init_ip(ldev, "dlbu", &ldev->dlbu->ip, LIMA_DLBU_BASE)) ||
-		    (err = lima_dlbu_init(ldev->dlbu))) {
-			kfree(ldev->dlbu);
-			ldev->dlbu = NULL;
-			goto err_out;
-		}
-
-	        ldev->bcast = kzalloc(sizeof(*ldev->bcast), GFP_KERNEL);
-		if (!ldev->bcast) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-		if ((err = lima_init_ip(ldev, "pp", &ldev->bcast->ip, LIMA_BCAST_BASE)) ||
-		    (err = lima_bcast_init(ldev->bcast))) {
-			kfree(ldev->bcast);
-			ldev->bcast = NULL;
-			goto err_out;
-		}
-	}
-	else {
-		ldev->l2_cache = kzalloc(sizeof(*ldev->l2_cache), GFP_KERNEL);
-		if (!ldev->l2_cache) {
-			err = -ENOMEM;
-			goto err_out;
-		}
-		ldev->l2_cache->ip.irq = -1;
-		if ((err = lima_init_ip(ldev, "l2-cache", &ldev->l2_cache->ip, LIMA_L2_BASE)) ||
-		    (err = lima_l2_cache_init(ldev->l2_cache))) {
-			kfree(ldev->l2_cache);
-			ldev->l2_cache = NULL;
-			goto err_out;
-		}
-	}
-
-	if ((err = lima_gp_group_init(ldev)))
-		goto err_out;
-
-	if ((err = lima_pp_group_init(ldev)))
-		goto err_out;
+	err = lima_init_pp_pipe(ldev);
+	if (err)
+		goto err_out4;
 
 	return 0;
 
-err_out:
-	lima_device_fini(ldev);
+err_out4:
+	lima_fini_gp_pipe(ldev);
+err_out3:
+	while (--i >= 0)
+		lima_fini_ip(ldev, i);
+err_out2:
+	lima_vm_put(ldev->empty_vm);
+err_out1:
+	lima_regulator_fini(ldev);
+err_out0:
+	lima_clk_fini(ldev);
 	return err;
 }
 
@@ -375,58 +355,11 @@ void lima_device_fini(struct lima_device *ldev)
 {
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(ldev->pipe); i++) {
-		if (ldev->pipe[i])
-			lima_sched_pipe_fini(ldev->pipe[i]);
-	}
+	lima_fini_pp_pipe(ldev);
+	lima_fini_gp_pipe(ldev);
 
-	if (ldev->pp) {
-		lima_pp_fini(ldev->pp);
-
-		for (i = 0; i < ldev->pp->num_core; i++) {
-			lima_pp_core_fini(ldev->pp->core + i);
-			lima_mmu_fini(&ldev->pp->core[i].mmu);
-		}
-
-		if (ldev->pp->l2_cache) {
-			lima_l2_cache_fini(ldev->pp->l2_cache);
-			kfree(ldev->pp->l2_cache);
-		}
-
-		kfree(ldev->pp);
-	}
-
-	if (ldev->gp) {
-		lima_gp_fini(ldev->gp);
-		lima_mmu_fini(&ldev->gp->mmu);
-
-		if (ldev->gp->l2_cache) {
-			lima_l2_cache_fini(ldev->gp->l2_cache);
-			kfree(ldev->gp->l2_cache);
-		}
-
-		kfree(ldev->gp);
-	}
-
-	if (ldev->bcast) {
-		lima_bcast_fini(ldev->bcast);
-		kfree(ldev->bcast);
-	}
-
-	if (ldev->dlbu) {
-		lima_dlbu_fini(ldev->dlbu);
-		kfree(ldev->dlbu);
-	}
-
-	if (ldev->l2_cache) {
-		lima_l2_cache_fini(ldev->l2_cache);
-		kfree(ldev->l2_cache);
-	}
-
-	if (ldev->pmu) {
-		lima_pmu_fini(ldev->pmu);
-		kfree(ldev->pmu);
-	}
+	for (i = lima_ip_num - 1; i >= 0; i--)
+		lima_fini_ip(ldev, i);
 
 	lima_vm_put(ldev->empty_vm);
 

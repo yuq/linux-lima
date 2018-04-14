@@ -19,32 +19,30 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
+#ifndef __LIMA_CTX_H__
+#define __LIMA_CTX_H__
 
-#include <linux/io.h>
-#include <linux/device.h>
+#include <linux/idr.h>
 
 #include "lima_device.h"
-#include "lima_bcast.h"
 
-#define LIMA_BCAST_BROADCAST_MASK    0x0
-#define LIMA_BCAST_INTERRUPT_MASK    0x4
+struct lima_ctx {
+	struct kref refcnt;
+	struct lima_device *dev;
+	struct lima_sched_context context[lima_pipe_num];
+	atomic_t guilty;
+};
 
-#define bcast_write(reg, data) writel(data, ip->iomem + LIMA_BCAST_##reg)
-#define bcast_read(reg) readl(ip->iomem + LIMA_BCAST_##reg)
+struct lima_ctx_mgr {
+	spinlock_t lock;
+	struct idr handles;
+};
 
-int lima_bcast_init(struct lima_ip *ip)
-{
-	struct lima_device *dev = ip->dev;
+int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id);
+int lima_ctx_free(struct lima_ctx_mgr *mgr, u32 id);
+struct lima_ctx *lima_ctx_get(struct lima_ctx_mgr *mgr, u32 id);
+void lima_ctx_put(struct lima_ctx *ctx);
+void lima_ctx_mgr_init(struct lima_ctx_mgr *mgr);
+void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr);
 
-	dev_info(dev->dev, "bcast %x %x\n",
-		 bcast_read(BROADCAST_MASK),
-		 bcast_read(INTERRUPT_MASK));
-
-	return 0;
-}
-
-void lima_bcast_fini(struct lima_ip *ip)
-{
-	
-}
-
+#endif

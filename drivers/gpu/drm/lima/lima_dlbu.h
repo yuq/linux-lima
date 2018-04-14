@@ -23,7 +23,9 @@
 #ifndef __LIMA_DLBU_H__
 #define __LIMA_DLBU_H__
 
-int lima_dlbu_init(struct lima_dlbu *dlbu);
-void lima_dlbu_fini(struct lima_dlbu *dlbu);
+struct lima_ip;
+
+int lima_dlbu_init(struct lima_ip *ip);
+void lima_dlbu_fini(struct lima_ip *ip);
 
 #endif

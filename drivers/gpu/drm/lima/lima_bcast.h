@@ -23,7 +23,9 @@
 #ifndef __LIMA_BCAST_H__
 #define __LIMA_BCAST_H__
 
-int lima_bcast_init(struct lima_bcast *bcast);
-void lima_bcast_fini(struct lima_bcast *bcast);
+struct lima_ip;
+
+int lima_bcast_init(struct lima_ip *ip);
+void lima_bcast_fini(struct lima_ip *ip);
 
 #endif
