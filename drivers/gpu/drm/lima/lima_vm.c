@@ -2,7 +2,8 @@
 #include <linux/dma-mapping.h>
 #include <linux/interval_tree_generic.h>
 
-#include "lima.h"
+#include "lima_device.h"
+#include "lima_vm.h"
 
 #define LIMA_PDE(va) (va >> 22)
 #define LIMA_PTE(va) ((va << 10) >> 22)
@@ -119,9 +120,6 @@ err_out0:
 
 int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
 {
-	int i, j;
-	struct lima_device *dev = vm->dev;
-
 	mutex_lock(&vm->lock);
 
 	lima_vm_it_remove(mapping, &vm->va);
@@ -130,11 +128,9 @@ int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
 
 	mutex_unlock(&vm->lock);
 
-	for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
-		for (j = 0; j < dev->pipe[i]->num_mmu; j++)
-			lima_mmu_zap_vm(dev->pipe[i]->mmu[j], vm, mapping->start,
-					mapping->last + 1 - mapping->start);
-	}
+	/* TODO: zap MMU using this vm in case buggy user app
+	 * free bo during GP/PP running which may corrupt kernel
+	 * reusing this memory. */
 
 	return 0;
 }
@@ -168,18 +164,10 @@ void lima_vm_release(struct kref *kref)
 {
 	struct lima_vm *vm = container_of(kref, struct lima_vm, refcount);
 	struct lima_device *dev = vm->dev;
-	int i, j;
-
-	/* switch mmu vm to empty vm if this vm is used by it */
-	if (vm != dev->empty_vm) {
-		for (i = 0; i < ARRAY_SIZE(dev->pipe); i++) {
-			for (j = 0; j < dev->pipe[i]->num_mmu; j++)
-				lima_mmu_switch_vm(dev->pipe[i]->mmu[j], vm, true);
-		}
-	}
+	int i;
 
 	if (!RB_EMPTY_ROOT(&vm->va.rb_root)) {
-		dev_err(vm->dev->dev, "still active bo inside vm\n");
+		dev_err(dev->dev, "still active bo inside vm\n");
 	}
 
 	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {

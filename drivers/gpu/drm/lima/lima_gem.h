@@ -27,6 +27,7 @@
 
 struct lima_bo;
 struct lima_submit;
+struct lima_vm;
 
 struct lima_bo_va {
 	struct list_head list;

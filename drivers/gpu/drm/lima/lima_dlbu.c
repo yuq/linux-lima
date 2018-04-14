@@ -20,7 +20,10 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "lima.h"
+#include <linux/io.h>
+#include <linux/device.h>
+
+#include "lima_device.h"
 #include "lima_dlbu.h"
 
 #define LIMA_DLBU_MASTER_TLLIST_PHYS_ADDR  0x0000
@@ -31,12 +34,12 @@
 #define	LIMA_DLBU_START_TILE_POS           0x0014
 #define	LIMA_DLBU_PP_ENABLE_MASK           0x0018
 
-#define dlbu_write(reg, data) writel(data, dlbu->ip.iomem + LIMA_DLBU_##reg)
-#define dlbu_read(reg) readl(dlbu->ip.iomem + LIMA_DLBU_##reg)
+#define dlbu_write(reg, data) writel(data, ip->iomem + LIMA_DLBU_##reg)
+#define dlbu_read(reg) readl(ip->iomem + LIMA_DLBU_##reg)
 
-int lima_dlbu_init(struct lima_dlbu *dlbu)
+int lima_dlbu_init(struct lima_ip *ip)
 {
-	struct lima_device *dev = dlbu->ip.dev;
+	struct lima_device *dev = ip->dev;
 
 	dev_info(dev->dev, "dlbu %x %x\n",
 		 dlbu_read(MASTER_TLLIST_PHYS_ADDR),
@@ -45,7 +48,7 @@ int lima_dlbu_init(struct lima_dlbu *dlbu)
 	return 0;
 }
 
-void lima_dlbu_fini(struct lima_dlbu *dlbu)
+void lima_dlbu_fini(struct lima_ip *ip)
 {
 	
 }

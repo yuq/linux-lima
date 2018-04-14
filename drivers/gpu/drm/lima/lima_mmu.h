@@ -19,32 +19,16 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
+#ifndef __LIMA_MMU_H__
+#define __LIMA_MMU_H__
 
-#include <linux/io.h>
-#include <linux/device.h>
+struct lima_ip;
+struct lima_vm;
 
-#include "lima_device.h"
-#include "lima_bcast.h"
+int lima_mmu_init(struct lima_ip *ip);
+void lima_mmu_fini(struct lima_ip *ip);
 
-#define LIMA_BCAST_BROADCAST_MASK    0x0
-#define LIMA_BCAST_INTERRUPT_MASK    0x4
+void lima_mmu_switch_vm(struct lima_ip *ip, struct lima_vm *vm);
+void lima_mmu_page_fault_resume(struct lima_ip *ip);
 
-#define bcast_write(reg, data) writel(data, ip->iomem + LIMA_BCAST_##reg)
-#define bcast_read(reg) readl(ip->iomem + LIMA_BCAST_##reg)
-
-int lima_bcast_init(struct lima_ip *ip)
-{
-	struct lima_device *dev = ip->dev;
-
-	dev_info(dev->dev, "bcast %x %x\n",
-		 bcast_read(BROADCAST_MASK),
-		 bcast_read(INTERRUPT_MASK));
-
-	return 0;
-}
-
-void lima_bcast_fini(struct lima_ip *ip)
-{
-	
-}
-
+#endif

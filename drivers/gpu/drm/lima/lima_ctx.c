@@ -20,7 +20,10 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "lima.h"
+#include <linux/slab.h>
+
+#include "lima_device.h"
+#include "lima_ctx.h"
 
 int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
 {
@@ -33,8 +36,8 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
 	ctx->dev = dev;
 	kref_init(&ctx->refcnt);
 
-	for (i = 0; i < LIMA_MAX_PIPE; i++) {
-		err = lima_sched_context_init(dev->pipe[i], ctx->context + i, &ctx->guilty);
+	for (i = 0; i < lima_pipe_num; i++) {
+		err = lima_sched_context_init(dev->pipe + i, ctx->context + i, &ctx->guilty);
 		if (err)
 			goto err_out0;
 	}
@@ -52,7 +55,7 @@ int lima_ctx_create(struct lima_device *dev, struct lima_ctx_mgr *mgr, u32 *id)
 
 err_out0:
 	for (i--; i >= 0; i--)
-		lima_sched_context_fini(dev->pipe[i], ctx->context + i);
+		lima_sched_context_fini(dev->pipe + i, ctx->context + i);
 	kfree(ctx);
 	return err;
 }
@@ -62,8 +65,8 @@ static void lima_ctx_do_release(struct kref *ref)
 	struct lima_ctx *ctx = container_of(ref, struct lima_ctx, refcnt);
 	int i;
 
-	for (i = 0; i < LIMA_MAX_PIPE; i++)
-		lima_sched_context_fini(ctx->dev->pipe[i], ctx->context + i);
+	for (i = 0; i < lima_pipe_num; i++)
+		lima_sched_context_fini(ctx->dev->pipe + i, ctx->context + i);
 	kfree(ctx);
 }
 
