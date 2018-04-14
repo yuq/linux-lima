@@ -24,6 +24,8 @@
 
 #include <drm/gpu_scheduler.h>
 
+struct lima_vm;
+
 struct lima_sched_task {
 	struct drm_sched_job base;
 
@@ -45,7 +47,12 @@ struct lima_sched_context {
 	uint32_t sequence;
 };
 
-#define LIMA_SCHED_PIPE_MAX_MMU 4
+#define LIMA_SCHED_PIPE_MAX_MMU       8
+#define LIMA_SCHED_PIPE_MAX_L2_CACHE  2
+#define LIMA_SCHED_PIPE_MAX_PROCESSOR 8
+
+struct lima_ip;
+
 struct lima_sched_pipe {
 	struct drm_gpu_scheduler base;
 
@@ -54,19 +61,28 @@ struct lima_sched_pipe {
 	spinlock_t fence_lock;
 
 	struct lima_sched_task *current_task;
+	struct lima_vm *current_vm;
 
-	struct lima_mmu *mmu[LIMA_SCHED_PIPE_MAX_MMU];
+	struct lima_ip *mmu[LIMA_SCHED_PIPE_MAX_MMU];
 	int num_mmu;
+
+	struct lima_ip *l2_cache[LIMA_SCHED_PIPE_MAX_L2_CACHE];
+	int num_l2_cache;
+
+	struct lima_ip *processor[LIMA_SCHED_PIPE_MAX_PROCESSOR];
+	int num_processor;
+
+	bool error;
+	atomic_t task;
 
 	int frame_size;
 	struct kmem_cache *task_slab;
 
-	int (*task_validate)(void *data, struct lima_sched_task *task);
-	void (*task_run)(void *data, struct lima_sched_task *task);
-	void (*task_fini)(void *data);
-	void (*task_error)(void *data);
-	void (*task_mmu_error)(void *data);
-	void *data;
+	int (*task_validate)(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
+	void (*task_run)(struct lima_sched_pipe *pipe, struct lima_sched_task *task);
+	void (*task_fini)(struct lima_sched_pipe *pipe);
+	void (*task_error)(struct lima_sched_pipe *pipe);
+	void (*task_mmu_error)(struct lima_sched_pipe *pipe);
 
 	struct work_struct error_work;
 };
@@ -90,14 +106,17 @@ int lima_sched_context_wait_fence(struct lima_sched_context *context,
 
 int lima_sched_pipe_init(struct lima_sched_pipe *pipe, const char *name);
 void lima_sched_pipe_fini(struct lima_sched_pipe *pipe);
-void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe, bool error);
+void lima_sched_pipe_task_done(struct lima_sched_pipe *pipe);
 
 static inline void lima_sched_pipe_mmu_error(struct lima_sched_pipe *pipe)
 {
-	pipe->task_mmu_error(pipe->data);
+	pipe->error = true;
+	pipe->task_mmu_error(pipe);
 }
 
 int lima_sched_slab_init(void);
 void lima_sched_slab_fini(void);
+
+unsigned long lima_timeout_to_jiffies(u64 timeout_ns);
 
 #endif

@@ -1,11 +1,35 @@
+/*
+ * Copyright (C) 2018 Lima Project
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/log2.h>
 #include <drm/drm_prime.h>
+#include <drm/lima_drm.h>
 
-#include "lima.h"
+#include "lima_drv.h"
 #include "lima_gem.h"
 #include "lima_gem_prime.h"
+#include "lima_vm.h"
 
 int lima_sched_timeout_ms = 0;
 int lima_sched_max_tasks = 32;
@@ -27,17 +51,17 @@ static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *
 	struct drm_lima_info *info = data;
 	struct lima_device *ldev = to_lima_dev(dev);
 
-	switch (ldev->gpu_type) {
-	case GPU_MALI400:
+	switch (ldev->id) {
+	case lima_gpu_mali400:
 		info->gpu_id = LIMA_INFO_GPU_MALI400;
 		break;
-	case GPU_MALI450:
+	case lima_gpu_mali450:
 		info->gpu_id = LIMA_INFO_GPU_MALI450;
 		break;
 	default:
 		return -ENODEV;
 	}
-	info->num_pp = ldev->pp->num_core;
+	info->num_pp = ldev->pipe[lima_pipe_pp].num_processor;
 	info->va_start = ldev->va_start;
 	info->va_end = ldev->va_end;
 	return 0;
@@ -89,10 +113,10 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	struct lima_submit submit = {0};
 	int err = 0, size;
 
-	if (args->pipe >= LIMA_MAX_PIPE || args->nr_bos == 0)
+	if (args->pipe >= lima_pipe_num || args->nr_bos == 0)
 		return -EINVAL;
 
-	pipe = ldev->pipe[args->pipe];
+	pipe = ldev->pipe + args->pipe;
 	if (args->frame_size != pipe->frame_size)
 		return -EINVAL;
 
@@ -119,7 +143,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 		goto out1;
 	}
 
-	err = pipe->task_validate(pipe->data, task);
+	err = pipe->task_validate(pipe, task);
 	if (err)
 		goto out1;
 
@@ -159,7 +183,7 @@ static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_
 	struct lima_ctx *ctx;
 	int err;
 
-	if (args->pipe >= LIMA_MAX_PIPE)
+	if (args->pipe >= lima_pipe_num)
 		return -EINVAL;
 
 	ctx = lima_ctx_get(&priv->ctx_mgr, args->ctx);
@@ -295,7 +319,7 @@ static int lima_pdev_probe(struct platform_device *pdev)
 
 	ldev->pdev = pdev;
 	ldev->dev = &pdev->dev;
-	ldev->gpu_type = (enum lima_gpu_type)of_device_get_match_data(&pdev->dev);
+	ldev->id = (enum lima_gpu_id)of_device_get_match_data(&pdev->dev);
 
 	platform_set_drvdata(pdev, ldev);
 
@@ -342,8 +366,8 @@ static int lima_pdev_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id dt_match[] = {
-	{ .compatible = "arm,mali-400", .data = (void *)GPU_MALI400 },
-	{ .compatible = "arm,mali-450", .data = (void *)GPU_MALI450 },
+	{ .compatible = "arm,mali-400", .data = (void *)lima_gpu_mali400 },
+	{ .compatible = "arm,mali-450", .data = (void *)lima_gpu_mali450 },
 	{}
 };
 MODULE_DEVICE_TABLE(of, dt_match);

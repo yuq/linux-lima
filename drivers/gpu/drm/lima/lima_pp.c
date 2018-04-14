@@ -1,4 +1,34 @@
-#include "lima.h"
+/*
+ * Copyright (C) 2018 Lima Project
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) OR AUTHOR(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/device.h>
+#include <linux/slab.h>
+
+#include <drm/lima_drm.h>
+
+#include "lima_device.h"
+#include "lima_pp.h"
 
 #define LIMA_PP_FRAME                        0x0000
 #define LIMA_PP_RSW			     0x0004
@@ -80,14 +110,14 @@
 	 LIMA_PP_IRQ_END_OF_FRAME          | \
 	 LIMA_PP_IRQ_MASK_ERROR)
 
-#define pp_write(reg, data) writel(data, core->ip.iomem + LIMA_PP_##reg)
-#define pp_read(reg) readl(core->ip.iomem + LIMA_PP_##reg)
+#define pp_write(reg, data) writel(data, ip->iomem + LIMA_PP_##reg)
+#define pp_read(reg) readl(ip->iomem + LIMA_PP_##reg)
 
-static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
+static irqreturn_t lima_pp_irq_handler(int irq, void *data)
 {
-	struct lima_pp_core *core = data;
-	struct lima_device *dev = core->ip.dev;
-	struct lima_pp *pp = dev->pp;
+	struct lima_ip *ip = data;
+	struct lima_device *dev = ip->dev;
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
 	u32 state = pp_read(INT_STATUS);
 	bool task_done = false;
 
@@ -102,7 +132,7 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 			state, status);
 
 		task_done = true;
-		pp->error = true;
+		pipe->error = true;
 
 		/* mask all interrupts before hard reset */
 		pp_write(INT_MASK, 0);
@@ -114,29 +144,29 @@ static irqreturn_t lima_pp_core_irq_handler(int irq, void *data)
 
 	pp_write(INT_CLEAR, state);
 
-	if (task_done && atomic_dec_and_test(&pp->task))
-		lima_sched_pipe_task_done(&pp->pipe, pp->error);
+	if (task_done && atomic_dec_and_test(&pipe->task))
+		lima_sched_pipe_task_done(pipe);
 
 	return IRQ_HANDLED;
 }
 
-static void lima_pp_core_soft_reset_async(struct lima_pp_core *core)
+static void lima_pp_soft_reset_async(struct lima_ip *ip)
 {
-	if (core->async_reset)
+	if (ip->data.async_reset)
 		return;
 
 	pp_write(INT_MASK, 0);
 	pp_write(INT_RAWSTAT, LIMA_PP_IRQ_MASK_ALL);
 	pp_write(CTRL, LIMA_PP_CTRL_SOFT_RESET);
-	core->async_reset = true;
+	ip->data.async_reset = true;
 }
 
-static int lima_pp_core_soft_reset_async_wait(struct lima_pp_core *core)
+static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
 {
-	struct lima_device *dev = core->ip.dev;
+	struct lima_device *dev = ip->dev;
 	int timeout;
 
-	if (!core->async_reset)
+	if (!ip->data.async_reset)
 		return 0;
 
 	for (timeout = 1000; timeout > 0; timeout--) {
@@ -152,38 +182,38 @@ static int lima_pp_core_soft_reset_async_wait(struct lima_pp_core *core)
 	pp_write(INT_CLEAR, LIMA_PP_IRQ_MASK_ALL);
 	pp_write(INT_MASK, LIMA_PP_IRQ_MASK_USED);
 
-	core->async_reset = false;
+	ip->data.async_reset = false;
 	return 0;
 }
 
-static void lima_pp_core_start_task(struct lima_pp_core *core, int index,
-				    struct lima_sched_task *task)
+static void lima_pp_start_task(struct lima_ip *ip, int index,
+			       struct lima_sched_task *task)
 {
 	struct drm_lima_m400_pp_frame *frame = task->frame;
 	u32 *frame_reg = (void *)&frame->frame;
 	const int num_frame_reg = 23, num_wb_reg = 12;
 	int i, j;
 
-	lima_pp_core_soft_reset_async_wait(core);
+	lima_pp_soft_reset_async_wait(ip);
 
 	frame->frame.plbu_array_address = frame->plbu_array_address[index];
 	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];
 
 	for (i = 0; i < num_frame_reg; i++)
-		writel(frame_reg[i], core->ip.iomem + LIMA_PP_FRAME + i * 4);
+		writel(frame_reg[i], ip->iomem + LIMA_PP_FRAME + i * 4);
 
 	for (i = 0; i < 3; i++) {
 		u32 *wb_reg = (void *)&frame->wb[i];
 		for (j = 0; j < num_wb_reg; j++)
-			writel(wb_reg[j], core->ip.iomem + LIMA_PP_WB(i) + j * 4);
+			writel(wb_reg[j], ip->iomem + LIMA_PP_WB(i) + j * 4);
 	}
 
 	pp_write(CTRL, LIMA_PP_CTRL_START_RENDERING);
 }
 
-static int lima_pp_core_hard_reset(struct lima_pp_core *core)
+static int lima_pp_hard_reset(struct lima_ip *ip)
 {
-	struct lima_device *dev = core->ip.dev;
+	struct lima_device *dev = ip->dev;
 	int timeout;
 
 	pp_write(PERF_CNT_0_LIMIT, 0xC0FFE000);
@@ -205,7 +235,7 @@ static int lima_pp_core_hard_reset(struct lima_pp_core *core)
 	return 0;
 }
 
-static void lima_pp_print_version(struct lima_pp_core *core)
+static void lima_pp_print_version(struct lima_ip *ip)
 {
 	u32 version, major, minor;
 	char *name;
@@ -230,95 +260,94 @@ static void lima_pp_print_version(struct lima_pp_core *core)
 		name = "unknow";
 		break;
 	}
-	dev_info(core->ip.dev->dev, "%s - %s version major %d minor %d\n",
-		 core->ip.name, name, major, minor);
+	dev_info(ip->dev->dev, "%s - %s version major %d minor %d\n",
+		 lima_ip_name(ip), name, major, minor);
 }
 
-int lima_pp_core_init(struct lima_pp_core *core)
+int lima_pp_init(struct lima_ip *ip)
 {
-	struct lima_device *dev = core->ip.dev;
+	struct lima_device *dev = ip->dev;
 	int err;
 
-	lima_pp_print_version(core);
+	if (ip->id == lima_ip_pp_bcast)
+		return 0;
 
-	core->async_reset = false;
-	lima_pp_core_soft_reset_async(core);
-	err = lima_pp_core_soft_reset_async_wait(core);
+	lima_pp_print_version(ip);
+
+	ip->data.async_reset = false;
+	lima_pp_soft_reset_async(ip);
+	err = lima_pp_soft_reset_async_wait(ip);
 	if (err)
 		return err;
 
-	err = devm_request_irq(dev->dev, core->ip.irq, lima_pp_core_irq_handler,
-			       IRQF_SHARED, core->ip.name, core);
+	err = devm_request_irq(dev->dev, ip->irq, lima_pp_irq_handler,
+			       IRQF_SHARED, lima_ip_name(ip), ip);
 	if (err) {
-		dev_err(dev->dev, "pp %s fail to request irq\n", core->ip.name);
+		dev_err(dev->dev, "pp %s fail to request irq\n",
+			lima_ip_name(ip));
 		return err;
 	}
 
 	return 0;
 }
 
-void lima_pp_core_fini(struct lima_pp_core *core)
+void lima_pp_fini(struct lima_ip *ip)
 {
 	
 }
 
-static int lima_pp_task_validate(void *data, struct lima_sched_task *task)
+static int lima_pp_task_validate(struct lima_sched_pipe *pipe,
+				 struct lima_sched_task *task)
 {
-	struct lima_pp *pp = data;
 	struct drm_lima_m400_pp_frame *f = task->frame;
 
-	if (f->num_pp > pp->num_core)
+	if (f->num_pp > pipe->num_processor)
 		return -EINVAL;
 
 	return 0;
 }
 
-static void lima_pp_task_run(void *data, struct lima_sched_task *task)
+static void lima_pp_task_run(struct lima_sched_pipe *pipe,
+			     struct lima_sched_task *task)
 {
-	struct lima_pp *pp = data;
 	struct drm_lima_m400_pp_frame *frame = task->frame;
 	int i;
 
-	pp->error = false;
-	atomic_set(&pp->task, frame->num_pp);
+	atomic_set(&pipe->task, frame->num_pp);
 
 	for (i = 0; i < frame->num_pp; i++)
-		lima_pp_core_start_task(pp->core + i, i, task);
+		lima_pp_start_task(pipe->processor[i], i, task);
 }
 
-static void lima_pp_task_fini(void *data)
+static void lima_pp_task_fini(struct lima_sched_pipe *pipe)
 {
-	struct lima_pp *pp = data;
 	int i;
 
-	for (i = 0; i < pp->num_core; i++)
-		lima_pp_core_soft_reset_async(pp->core + i);
+	for (i = 0; i < pipe->num_processor; i++)
+		lima_pp_soft_reset_async(pipe->processor[i]);
 }
 
-static void lima_pp_task_error(void *data)
+static void lima_pp_task_error(struct lima_sched_pipe *pipe)
 {
-	struct lima_pp *pp = data;
 	int i;
 
-	for (i = 0; i < pp->num_core; i++)
-		lima_pp_core_hard_reset(pp->core + i);
+	for (i = 0; i < pipe->num_processor; i++)
+		lima_pp_hard_reset(pipe->processor[i]);
 }
 
-static void lima_pp_task_mmu_error(void *data)
+static void lima_pp_task_mmu_error(struct lima_sched_pipe *pipe)
 {
-	struct lima_pp *pp = data;
-
-	pp->error = true;
-	if (atomic_dec_and_test(&pp->task))
-		lima_sched_pipe_task_done(&pp->pipe, pp->error);
+	if (atomic_dec_and_test(&pipe->task))
+		lima_sched_pipe_task_done(pipe);
 }
 
 static struct kmem_cache *lima_pp_task_slab = NULL;
 static int lima_pp_task_slab_refcnt = 0;
 
-int lima_pp_init(struct lima_pp *pp)
+int lima_pp_pipe_init(struct lima_device *dev)
 {
-	int i, frame_size;
+	int frame_size;
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
 
 	frame_size = sizeof(struct drm_lima_m400_pp_frame);
 	if (!lima_pp_task_slab) {
@@ -330,23 +359,19 @@ int lima_pp_init(struct lima_pp *pp)
 	}
 	lima_pp_task_slab_refcnt++;
 
-	pp->pipe.frame_size = frame_size;
-	pp->pipe.task_slab = lima_pp_task_slab;
+	pipe->frame_size = frame_size;
+	pipe->task_slab = lima_pp_task_slab;
 
-	pp->pipe.task_validate = lima_pp_task_validate;
-	pp->pipe.task_run = lima_pp_task_run;
-	pp->pipe.task_fini = lima_pp_task_fini;
-	pp->pipe.task_error = lima_pp_task_error;
-	pp->pipe.task_mmu_error = lima_pp_task_mmu_error;
-	pp->pipe.data = pp;
+	pipe->task_validate = lima_pp_task_validate;
+	pipe->task_run = lima_pp_task_run;
+	pipe->task_fini = lima_pp_task_fini;
+	pipe->task_error = lima_pp_task_error;
+	pipe->task_mmu_error = lima_pp_task_mmu_error;
 
-	for (i = 0; i < pp->num_core; i++)
-		pp->pipe.mmu[i] = &pp->core[i].mmu;
-	pp->pipe.num_mmu = pp->num_core;
 	return 0;
 }
 
-void lima_pp_fini(struct lima_pp *pp)
+void lima_pp_pipe_fini(struct lima_device *dev)
 {
 	if (!--lima_pp_task_slab_refcnt) {
 		kmem_cache_destroy(lima_pp_task_slab);

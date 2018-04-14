@@ -37,6 +37,14 @@ struct lima_vm_page {
 	dma_addr_t dma;
 };
 
+struct lima_bo_va_mapping {
+	struct list_head list;
+	struct rb_node rb;
+	uint32_t start;
+	uint32_t last;
+	uint32_t __subtree_last;
+};
+
 struct lima_vm {
 	struct mutex lock;
 	struct kref refcount;
@@ -63,8 +71,6 @@ static inline void lima_vm_put(struct lima_vm *vm)
 {
 	kref_put(&vm->refcount, lima_vm_release);
 }
-
-struct lima_bo_va_mapping;
 
 int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
 		struct lima_bo_va_mapping *mapping);

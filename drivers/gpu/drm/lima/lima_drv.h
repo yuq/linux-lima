@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lima Project
+ * Copyright (C) 2017 Lima Project
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -19,32 +19,45 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
+#ifndef __LIMA_DRV_H__
+#define __LIMA_DRV_H__
 
-#include <linux/io.h>
-#include <linux/device.h>
+#include <drm/drmP.h>
 
-#include "lima_device.h"
-#include "lima_bcast.h"
+#include "lima_ctx.h"
 
-#define LIMA_BCAST_BROADCAST_MASK    0x0
-#define LIMA_BCAST_INTERRUPT_MASK    0x4
+extern int lima_sched_timeout_ms;
+extern int lima_sched_max_tasks;
 
-#define bcast_write(reg, data) writel(data, ip->iomem + LIMA_BCAST_##reg)
-#define bcast_read(reg) readl(ip->iomem + LIMA_BCAST_##reg)
+struct lima_vm;
+struct lima_bo;
+struct lima_sched_task;
 
-int lima_bcast_init(struct lima_ip *ip)
+struct drm_lima_gem_submit_bo;
+
+struct lima_drm_priv {
+	struct lima_vm *vm;
+	struct lima_ctx_mgr ctx_mgr;
+};
+
+struct lima_submit {
+	struct lima_ctx *ctx;
+	int pipe;
+
+	struct drm_lima_gem_submit_bo *bos;
+	struct lima_bo **lbos;
+	u32 nr_bos;
+
+	struct lima_sched_task *task;
+
+	uint32_t fence;
+	uint32_t done;
+};
+
+static inline struct lima_drm_priv *
+to_lima_drm_priv(struct drm_file *file)
 {
-	struct lima_device *dev = ip->dev;
-
-	dev_info(dev->dev, "bcast %x %x\n",
-		 bcast_read(BROADCAST_MASK),
-		 bcast_read(INTERRUPT_MASK));
-
-	return 0;
+	return file->driver_priv;
 }
 
-void lima_bcast_fini(struct lima_ip *ip)
-{
-	
-}
-
+#endif
