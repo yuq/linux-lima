@@ -367,7 +367,12 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 	 * 1. is it related to TLB
 	 * 2. how much performance will be affected by L2 cache flush
 	 * 3. can we reduce the calling of this function because all
-	 *    GP/PP use the same L2 cache
+	 *    GP/PP use the same L2 cache on mali400
+	 *
+	 * TODO:
+	 * 1. move this to task fini to save some wait time?
+	 * 2. when GP/PP use different l2 cache, need PP wait GP l2
+	 *    cache flush?
 	 */
 	for (i = 0; i < pipe->num_l2_cache; i++)
 		lima_l2_cache_flush(pipe->l2_cache[i]);

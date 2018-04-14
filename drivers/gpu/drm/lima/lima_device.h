@@ -75,6 +75,8 @@ struct lima_ip {
 		unsigned switch_delay;
 		/* gp/pp */
 		bool async_reset;
+		/* l2 cache */
+		spinlock_t lock;
 	} data;
 };
 
