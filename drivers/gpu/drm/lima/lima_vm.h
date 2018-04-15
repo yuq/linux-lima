@@ -30,6 +30,10 @@
 #define LIMA_PAGE_MASK    (LIMA_PAGE_SIZE - 1)
 #define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
 
+#define LIMA_VA_RESERVE_START  0xFFFFF000
+#define LIMA_VA_RESERVE_DLBU   LIMA_VA_RESERVE_START
+#define LIMA_VA_RESERVE_END    0x100000000
+
 struct lima_device;
 
 struct lima_vm_page {
