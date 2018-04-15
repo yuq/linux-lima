@@ -25,6 +25,7 @@
 
 #include "lima_device.h"
 #include "lima_dlbu.h"
+#include "lima_vm.h"
 
 #define LIMA_DLBU_MASTER_TLLIST_PHYS_ADDR  0x0000
 #define	LIMA_DLBU_MASTER_TLLIST_VADDR      0x0004
@@ -41,9 +42,8 @@ int lima_dlbu_init(struct lima_ip *ip)
 {
 	struct lima_device *dev = ip->dev;
 
-	dev_info(dev->dev, "dlbu %x %x\n",
-		 dlbu_read(MASTER_TLLIST_PHYS_ADDR),
-		 dlbu_read(PP_ENABLE_MASK));
+	dlbu_write(MASTER_TLLIST_PHYS_ADDR, dev->dlbu_dma);
+	dlbu_write(MASTER_TLLIST_VADDR, LIMA_VA_RESERVE_DLBU);
 
 	return 0;
 }

@@ -310,38 +310,54 @@ int lima_device_init(struct lima_device *ldev)
 		err = -ENOMEM;
 		goto err_out1;
 	}
+
 	ldev->va_start = 0;
-	ldev->va_end = 0x100000000;
+	if (ldev->id == lima_gpu_mali450) {
+		ldev->va_end = LIMA_VA_RESERVE_START;
+		ldev->dlbu_cpu = dma_alloc_wc(
+			ldev->dev, LIMA_PAGE_SIZE,
+			&ldev->dlbu_dma, GFP_KERNEL);
+		if (!ldev->dlbu_cpu) {
+			err = -ENOMEM;
+			goto err_out2;
+		}
+	}
+	else
+		ldev->va_end = LIMA_VA_RESERVE_END;
 
 	res = platform_get_resource(ldev->pdev, IORESOURCE_MEM, 0);
 	ldev->iomem = devm_ioremap_resource(ldev->dev, res);
 	if (IS_ERR(ldev->iomem)) {
 		dev_err(ldev->dev, "fail to ioremap iomem\n");
 	        err = PTR_ERR(ldev->iomem);
-		goto err_out2;
+		goto err_out3;
 	}
 
 	for (i = 0; i < lima_ip_num; i++) {
 		err = lima_init_ip(ldev, i);
 		if (err)
-			goto err_out3;
+			goto err_out4;
 	}
 
 	err = lima_init_gp_pipe(ldev);
 	if (err)
-		goto err_out3;
+		goto err_out4;
 
 	err = lima_init_pp_pipe(ldev);
 	if (err)
-		goto err_out4;
+		goto err_out5;
 
 	return 0;
 
-err_out4:
+err_out5:
 	lima_fini_gp_pipe(ldev);
-err_out3:
+err_out4:
 	while (--i >= 0)
 		lima_fini_ip(ldev, i);
+err_out3:
+	if (ldev->dlbu_cpu)
+		dma_free_wc(ldev->dev, LIMA_PAGE_SIZE,
+			    ldev->dlbu_cpu, ldev->dlbu_dma);
 err_out2:
 	lima_vm_put(ldev->empty_vm);
 err_out1:
@@ -360,6 +376,10 @@ void lima_device_fini(struct lima_device *ldev)
 
 	for (i = lima_ip_num - 1; i >= 0; i--)
 		lima_fini_ip(ldev, i);
+
+	if (ldev->dlbu_cpu)
+		dma_free_wc(ldev->dev, LIMA_PAGE_SIZE,
+			    ldev->dlbu_cpu, ldev->dlbu_dma);
 
 	lima_vm_put(ldev->empty_vm);
 
