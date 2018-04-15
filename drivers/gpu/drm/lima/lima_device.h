@@ -106,6 +106,9 @@ struct lima_device {
 	struct lima_vm *empty_vm;
 	uint64_t va_start;
 	uint64_t va_end;
+
+	u32 *dlbu_cpu;
+	dma_addr_t dlbu_dma;
 };
 
 int lima_device_init(struct lima_device *ldev);
