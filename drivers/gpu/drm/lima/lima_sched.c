@@ -383,8 +383,12 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 		pipe->current_vm = task->vm;
 	}
 
-	for (i = 0; i < pipe->num_mmu; i++)
-		lima_mmu_switch_vm(pipe->mmu[i], vm);
+	if (pipe->bcast_mmu)
+		lima_mmu_switch_vm(pipe->bcast_mmu, vm);
+	else {
+		for (i = 0; i < pipe->num_mmu; i++)
+			lima_mmu_switch_vm(pipe->mmu[i], vm);
+	}
 
 	if (last_vm)
 		lima_vm_put(last_vm);
@@ -398,15 +402,18 @@ static struct dma_fence *lima_sched_run_job(struct drm_sched_job *job)
 static void lima_sched_handle_error_task(struct lima_sched_pipe *pipe,
 					 struct lima_sched_task *task)
 {
-	int i;
-
 	kthread_park(pipe->base.thread);
 	drm_sched_hw_job_reset(&pipe->base, &task->base);
 
 	pipe->task_error(pipe);
 
-	for (i = 0; i < pipe->num_mmu; i++)
-		lima_mmu_page_fault_resume(pipe->mmu[i]);
+	if (pipe->bcast_mmu)
+		lima_mmu_page_fault_resume(pipe->bcast_mmu);
+	else {
+		int i;
+		for (i = 0; i < pipe->num_mmu; i++)
+			lima_mmu_page_fault_resume(pipe->mmu[i]);
+	}
 
 	if (pipe->current_vm)
 		lima_vm_put(pipe->current_vm);

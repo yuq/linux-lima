@@ -28,6 +28,9 @@ struct lima_device;
 int lima_pp_init(struct lima_ip *ip);
 void lima_pp_fini(struct lima_ip *ip);
 
+int lima_pp_bcast_init(struct lima_ip *ip);
+void lima_pp_bcast_fini(struct lima_ip *ip);
+
 int lima_pp_pipe_init(struct lima_device *dev);
 void lima_pp_pipe_fini(struct lima_device *dev);
 
