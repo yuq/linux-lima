@@ -74,7 +74,7 @@ static struct lima_ip_desc lima_ip_desc[lima_ip_num] = {
 	LIMA_IP_DESC(pp4,         false, false, -1,      0x28000, pp,       "pp4"),
 	LIMA_IP_DESC(pp5,         false, false, -1,      0x2A000, pp,       "pp5"),
 	LIMA_IP_DESC(pp6,         false, false, -1,      0x2C000, pp,       "pp6"),
-	LIMA_IP_DESC(pp7,         false, false, -1,      0x2D000, pp,       "pp7"),
+	LIMA_IP_DESC(pp7,         false, false, -1,      0x2E000, pp,       "pp7"),
 	LIMA_IP_DESC(gpmmu,       true,  true,  0x03000, 0x03000, mmu,      "gpmmu"),
 	LIMA_IP_DESC(ppmmu0,      true,  true,  0x04000, 0x04000, mmu,      "ppmmu0"),
 	LIMA_IP_DESC(ppmmu1,      false, false, 0x05000, 0x05000, mmu,      "ppmmu1"),
@@ -86,7 +86,7 @@ static struct lima_ip_desc lima_ip_desc[lima_ip_num] = {
 	LIMA_IP_DESC(ppmmu7,      false, false, -1,      0x1F000, mmu,      "ppmmu7"),
 	LIMA_IP_DESC(dlbu,        false, true,  -1,      0x14000, dlbu,     NULL),
 	LIMA_IP_DESC(bcast,       false, true,  -1,      0x13000, bcast,    NULL),
-	LIMA_IP_DESC(pp_bcast,    false, true,  -1,      0x16000, pp,       "pp"),
+	LIMA_IP_DESC(pp_bcast,    false, true,  -1,      0x16000, pp_bcast, "pp"),
 	LIMA_IP_DESC(ppmmu_bcast, false, true,  -1,      0x15000, mmu,      NULL),
 };
 
@@ -271,6 +271,11 @@ static int lima_init_pp_pipe(struct lima_device *dev)
 		}
 	}
 
+	if (dev->ip[lima_ip_bcast].present) {
+		pipe->bcast_processor = dev->ip + lima_ip_pp_bcast;
+		pipe->bcast_mmu = dev->ip + lima_ip_ppmmu_bcast;
+	}
+
 	if ((err = lima_pp_pipe_init(dev))) {
 		lima_sched_pipe_fini(pipe);
 		return err;
@@ -346,6 +351,11 @@ int lima_device_init(struct lima_device *ldev)
 	err = lima_init_pp_pipe(ldev);
 	if (err)
 		goto err_out5;
+
+	if (ldev->id == lima_gpu_mali450) {
+		lima_dlbu_enable(ldev);
+		lima_bcast_enable(ldev);
+	}
 
 	return 0;
 

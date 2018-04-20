@@ -29,6 +29,9 @@
 
 #include "lima_device.h"
 #include "lima_pp.h"
+#include "lima_dlbu.h"
+#include "lima_bcast.h"
+#include "lima_vm.h"
 
 #define LIMA_PP_FRAME                        0x0000
 #define LIMA_PP_RSW			     0x0004
@@ -113,17 +116,10 @@
 #define pp_write(reg, data) writel(data, ip->iomem + LIMA_PP_##reg)
 #define pp_read(reg) readl(ip->iomem + LIMA_PP_##reg)
 
-static irqreturn_t lima_pp_irq_handler(int irq, void *data)
+static void lima_pp_handle_irq(struct lima_ip *ip, u32 state)
 {
-	struct lima_ip *ip = data;
 	struct lima_device *dev = ip->dev;
 	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
-	u32 state = pp_read(INT_STATUS);
-	bool task_done = false;
-
-	/* for shared irq case */
-	if (!state)
-		return IRQ_NONE;
 
 	if (state & LIMA_PP_IRQ_MASK_ERROR) {
 		u32 status = pp_read(STATUS);
@@ -131,23 +127,69 @@ static irqreturn_t lima_pp_irq_handler(int irq, void *data)
 		dev_err(dev->dev, "pp error irq state=%x status=%x\n",
 			state, status);
 
-		task_done = true;
 		pipe->error = true;
 
 		/* mask all interrupts before hard reset */
 		pp_write(INT_MASK, 0);
 	}
-	else {
-		if (state & LIMA_PP_IRQ_END_OF_FRAME)
-			task_done = true;
-	}
 
 	pp_write(INT_CLEAR, state);
+}
 
-	if (task_done && atomic_dec_and_test(&pipe->task))
+static irqreturn_t lima_pp_irq_handler(int irq, void *data)
+{
+	struct lima_ip *ip = data;
+	struct lima_device *dev = ip->dev;
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+	u32 state = pp_read(INT_STATUS);
+
+	/* for shared irq case */
+	if (!state)
+		return IRQ_NONE;
+
+	lima_pp_handle_irq(ip, state);
+
+	if (atomic_dec_and_test(&pipe->task))
 		lima_sched_pipe_task_done(pipe);
 
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t lima_pp_bcast_irq_handler(int irq, void *data)
+{
+	int i;
+	irqreturn_t ret = IRQ_NONE;
+	struct lima_ip *pp_bcast = data;
+	struct lima_device *dev = pp_bcast->dev;
+	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+
+	for (i = 0; i < pipe->num_processor; i++) {
+		struct lima_ip *ip = pipe->processor[i];
+		u32 status, state;
+
+		if (pipe->done & (1 << i))
+			continue;
+
+		/* status read first in case int state change in the middle
+		 * which may miss the interrupt handling */
+		status = pp_read(STATUS);
+		state = pp_read(INT_STATUS);
+
+		if (state) {
+			lima_pp_handle_irq(ip, state);
+			ret = IRQ_HANDLED;
+		}
+		else {
+			if (status & LIMA_PP_STATUS_RENDERING_ACTIVE)
+				continue;
+		}
+
+		pipe->done |= (1 << i);
+		if (atomic_dec_and_test(&pipe->task))
+			lima_sched_pipe_task_done(pipe);
+	}
+
+	return ret;
 }
 
 static void lima_pp_soft_reset_async(struct lima_ip *ip)
@@ -161,13 +203,10 @@ static void lima_pp_soft_reset_async(struct lima_ip *ip)
 	ip->data.async_reset = true;
 }
 
-static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
+static int lima_pp_soft_reset_async_wait_one(struct lima_ip *ip)
 {
 	struct lima_device *dev = ip->dev;
 	int timeout;
-
-	if (!ip->data.async_reset)
-		return 0;
 
 	for (timeout = 1000; timeout > 0; timeout--) {
 		if (!(pp_read(STATUS) & LIMA_PP_STATUS_RENDERING_ACTIVE) &&
@@ -175,35 +214,54 @@ static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
 			break;
 	}
 	if (!timeout) {
-		dev_err(dev->dev, "gp reset time out\n");
+		dev_err(dev->dev, "pp %s reset time out\n", lima_ip_name(ip));
 		return -ETIMEDOUT;
 	}
 
 	pp_write(INT_CLEAR, LIMA_PP_IRQ_MASK_ALL);
 	pp_write(INT_MASK, LIMA_PP_IRQ_MASK_USED);
-
-	ip->data.async_reset = false;
 	return 0;
 }
 
-static void lima_pp_start_task(struct lima_ip *ip, int index,
-			       struct lima_sched_task *task)
+static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
 {
-	struct drm_lima_m400_pp_frame *frame = task->frame;
-	u32 *frame_reg = (void *)&frame->frame;
+	int i, err = 0;
+
+	if (!ip->data.async_reset)
+		return 0;
+
+	if (ip->id == lima_ip_pp_bcast) {
+		struct lima_device *dev = ip->dev;
+		struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
+		for (i = 0; i < pipe->num_processor; i++)
+			err |= lima_pp_soft_reset_async_wait_one(pipe->processor[i]);
+	}
+	else
+		err = lima_pp_soft_reset_async_wait_one(ip);
+
+	ip->data.async_reset = false;
+	return err;
+}
+
+static void lima_pp_start_task(struct lima_ip *ip,
+			       struct drm_lima_pp_frame_reg *frame,
+			       struct drm_lima_pp_wb_reg *wb,
+			       bool skip_stack_addr)
+{
 	const int num_frame_reg = 23, num_wb_reg = 12;
 	int i, j;
 
-	lima_pp_soft_reset_async_wait(ip);
+	for (i = 0; i < num_frame_reg; i++) {
+		u32 *frame_reg = (void *)frame;
 
-	frame->frame.plbu_array_address = frame->plbu_array_address[index];
-	frame->frame.fragment_stack_address = frame->fragment_stack_address[index];
+		if (skip_stack_addr && i * 4 == LIMA_PP_STACK)
+			continue;
 
-	for (i = 0; i < num_frame_reg; i++)
 		writel(frame_reg[i], ip->iomem + LIMA_PP_FRAME + i * 4);
+	}
 
 	for (i = 0; i < 3; i++) {
-		u32 *wb_reg = (void *)&frame->wb[i];
+		u32 *wb_reg = (void *)(wb + i);
 		for (j = 0; j < num_wb_reg; j++)
 			writel(wb_reg[j], ip->iomem + LIMA_PP_WB(i) + j * 4);
 	}
@@ -269,9 +327,6 @@ int lima_pp_init(struct lima_ip *ip)
 	struct lima_device *dev = ip->dev;
 	int err;
 
-	if (ip->id == lima_ip_pp_bcast)
-		return 0;
-
 	lima_pp_print_version(ip);
 
 	ip->data.async_reset = false;
@@ -296,13 +351,36 @@ void lima_pp_fini(struct lima_ip *ip)
 	
 }
 
+int lima_pp_bcast_init(struct lima_ip *ip)
+{
+	struct lima_device *dev = ip->dev;
+	int err;
+
+	err = devm_request_irq(dev->dev, ip->irq, lima_pp_bcast_irq_handler,
+			       IRQF_SHARED, lima_ip_name(ip), ip);
+	if (err) {
+		dev_err(dev->dev, "pp %s fail to request irq\n",
+			lima_ip_name(ip));
+		return err;
+	}
+
+	return 0;
+}
+
+void lima_pp_bcast_fini(struct lima_ip *ip)
+{
+	
+}
+
 static int lima_pp_task_validate(struct lima_sched_pipe *pipe,
 				 struct lima_sched_task *task)
 {
-	struct drm_lima_m400_pp_frame *f = task->frame;
+	if (!pipe->bcast_processor) {
+		struct drm_lima_m400_pp_frame *f = task->frame;
 
-	if (f->num_pp > pipe->num_processor)
-		return -EINVAL;
+		if (f->num_pp > pipe->num_processor)
+			return -EINVAL;
+	}
 
 	return 0;
 }
@@ -310,29 +388,71 @@ static int lima_pp_task_validate(struct lima_sched_pipe *pipe,
 static void lima_pp_task_run(struct lima_sched_pipe *pipe,
 			     struct lima_sched_task *task)
 {
-	struct drm_lima_m400_pp_frame *frame = task->frame;
-	int i;
+	if (pipe->bcast_processor) {
+		struct drm_lima_m450_pp_frame *frame = task->frame;
+		struct lima_device *dev = pipe->bcast_processor->dev;
+		int i;
 
-	atomic_set(&pipe->task, frame->num_pp);
+		pipe->done = 0;
+		atomic_set(&pipe->task, pipe->num_processor);
 
-	for (i = 0; i < frame->num_pp; i++)
-		lima_pp_start_task(pipe->processor[i], i, task);
+		frame->frame.plbu_array_address = LIMA_VA_RESERVE_DLBU;
+		lima_dlbu_set_reg(dev->ip + lima_ip_dlbu, frame->dlbu_regs);
+
+		lima_pp_soft_reset_async_wait(pipe->bcast_processor);
+
+		for (i = 0; i < pipe->num_processor; i++) {
+			struct lima_ip *ip = pipe->processor[i];
+			pp_write(STACK, frame->fragment_stack_address[i]);
+		}
+
+		lima_pp_start_task(pipe->bcast_processor, &frame->frame,
+				   frame->wb, true);
+	}
+	else {
+		struct drm_lima_m400_pp_frame *frame = task->frame;
+		int i;
+
+		atomic_set(&pipe->task, frame->num_pp);
+
+		for (i = 0; i < frame->num_pp; i++) {
+			frame->frame.plbu_array_address =
+				frame->plbu_array_address[i];
+			frame->frame.fragment_stack_address =
+				frame->fragment_stack_address[i];
+
+			lima_pp_soft_reset_async_wait(pipe->processor[i]);
+
+			lima_pp_start_task(pipe->processor[i],
+					   &frame->frame,
+					   frame->wb, false);
+		}
+	}
 }
 
 static void lima_pp_task_fini(struct lima_sched_pipe *pipe)
 {
-	int i;
-
-	for (i = 0; i < pipe->num_processor; i++)
-		lima_pp_soft_reset_async(pipe->processor[i]);
+	if (pipe->bcast_processor)
+		lima_pp_soft_reset_async(pipe->bcast_processor);
+	else {
+		int i;
+		for (i = 0; i < pipe->num_processor; i++)
+			lima_pp_soft_reset_async(pipe->processor[i]);
+	}
 }
 
 static void lima_pp_task_error(struct lima_sched_pipe *pipe)
 {
 	int i;
 
+	if (pipe->bcast_processor)
+		lima_bcast_disable(pipe->bcast_processor->dev);
+
 	for (i = 0; i < pipe->num_processor; i++)
 		lima_pp_hard_reset(pipe->processor[i]);
+
+	if (pipe->bcast_processor)
+		lima_bcast_enable(pipe->bcast_processor->dev);
 }
 
 static void lima_pp_task_mmu_error(struct lima_sched_pipe *pipe)
@@ -349,7 +469,11 @@ int lima_pp_pipe_init(struct lima_device *dev)
 	int frame_size;
 	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_pp;
 
-	frame_size = sizeof(struct drm_lima_m400_pp_frame);
+	if (dev->id == lima_gpu_mali400)
+		frame_size = sizeof(struct drm_lima_m400_pp_frame);
+	else
+		frame_size = sizeof(struct drm_lima_m450_pp_frame);
+
 	if (!lima_pp_task_slab) {
 		lima_pp_task_slab = kmem_cache_create(
 			"lima_pp_task", sizeof(struct lima_sched_task) + frame_size,
