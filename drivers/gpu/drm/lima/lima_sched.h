@@ -72,6 +72,10 @@ struct lima_sched_pipe {
 	struct lima_ip *processor[LIMA_SCHED_PIPE_MAX_PROCESSOR];
 	int num_processor;
 
+	struct lima_ip *bcast_processor;
+	struct lima_ip *bcast_mmu;
+
+	u32 done;
 	bool error;
 	atomic_t task;
 
