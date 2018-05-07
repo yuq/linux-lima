@@ -33,6 +33,7 @@
 
 int lima_sched_timeout_ms = 0;
 int lima_sched_max_tasks = 32;
+int lima_max_mem = -1;
 
 MODULE_PARM_DESC(sched_timeout_ms, "task run timeout in ms (0 = no timeout (default))");
 module_param_named(sched_timeout_ms, lima_sched_timeout_ms, int, 0444);
@@ -40,11 +41,8 @@ module_param_named(sched_timeout_ms, lima_sched_timeout_ms, int, 0444);
 MODULE_PARM_DESC(sched_max_tasks, "max queued task num in a context (default 32)");
 module_param_named(sched_max_tasks, lima_sched_max_tasks, int, 0444);
 
-
-static inline struct lima_device *to_lima_dev(struct drm_device *dev)
-{
-	return dev->dev_private;
-}
+MODULE_PARM_DESC(max_mem, "Max memory size in MB can be used (<0 = auto)");
+module_param_named(max_mem, lima_max_mem, int, 0444);
 
 static int lima_ioctl_info(struct drm_device *dev, void *data, struct drm_file *file)
 {
@@ -120,7 +118,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	if (args->frame_size != pipe->frame_size)
 		return -EINVAL;
 
-	size = args->nr_bos * (sizeof(*submit.bos) + sizeof(*submit.lbos));
+	size = args->nr_bos * (sizeof(*submit.bos) + sizeof(*submit.vbs));
 	bos = kzalloc(size, GFP_KERNEL);
 	if (!bos)
 		return -ENOMEM;
@@ -155,7 +153,7 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 
 	submit.pipe = args->pipe;
 	submit.bos = bos;
-	submit.lbos = (void *)bos + size;
+	submit.vbs = (void *)bos + size;
 	submit.nr_bos = args->nr_bos;
 	submit.task = task;
 	submit.ctx = ctx;
@@ -267,8 +265,6 @@ static const struct drm_ioctl_desc lima_drm_driver_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(LIMA_CTX, lima_ioctl_ctx, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
-extern const struct vm_operations_struct lima_gem_vm_ops;
-
 static const struct file_operations lima_drm_driver_fops = {
 	.owner              = THIS_MODULE,
 	.open               = drm_open,
@@ -290,7 +286,6 @@ static struct drm_driver lima_drm_driver = {
 	.gem_free_object_unlocked = lima_gem_free_object,
 	.gem_open_object    = lima_gem_object_open,
 	.gem_close_object   = lima_gem_object_close,
-	.gem_vm_ops         = &lima_gem_vm_ops,
 	.name               = "lima",
 	.desc               = "lima DRM",
 	.date               = "20170325",
@@ -387,6 +382,9 @@ static void lima_check_module_param(void)
 		lima_sched_max_tasks = 4;
 	else
 		lima_sched_max_tasks = roundup_pow_of_two(lima_sched_max_tasks);
+
+	if (lima_max_mem < 32)
+		lima_max_mem = -1;
 }
 
 static int __init lima_init(void)

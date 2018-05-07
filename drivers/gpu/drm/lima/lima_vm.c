@@ -4,6 +4,24 @@
 
 #include "lima_device.h"
 #include "lima_vm.h"
+#include "lima_object.h"
+
+struct lima_bo_va_mapping {
+	struct list_head list;
+	struct rb_node rb;
+	uint32_t start;
+	uint32_t last;
+	uint32_t __subtree_last;
+};
+
+struct lima_bo_va {
+	struct list_head list;
+	unsigned ref_count;
+
+	struct list_head mapping;
+
+	struct lima_vm *vm;
+};
 
 #define LIMA_PDE(va) (va >> 22)
 #define LIMA_PTE(va) ((va & 0x3FFFFF) >> 12)
@@ -50,17 +68,10 @@ static void lima_vm_unmap_page_table(struct lima_vm *vm, u32 start, u32 end)
 	for (addr = start; addr <= end; addr += LIMA_PAGE_SIZE) {
 		u32 pde = LIMA_PDE(addr);
 		u32 pte = LIMA_PTE(addr);
+		u32 *pt;
 
-		vm->pts[pde].cpu[pte] = 0;
-		vm->pts[pde].dma--;
-		if (!(vm->pts[pde].dma & LIMA_PAGE_MASK)) {
-			vm->pd.cpu[pde] = 0;
-			vm->pd.dma--;
-
-			dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE,
-				    vm->pts[pde].cpu, vm->pts[pde].dma);
-			vm->pts[pde].cpu = 0;
-		}
+		pt = lima_bo_kmap(vm->pt[pde]);
+		pt[pte] = 0;
 	}
 }
 
@@ -68,101 +79,197 @@ static int lima_vm_map_page_table(struct lima_vm *vm, dma_addr_t *dma,
 				  u32 start, u32 end)
 {
 	u64 addr;
-	int i = 0;
+	int err, i = 0;
 
 	for (addr = start; addr <= end; addr += LIMA_PAGE_SIZE) {
 		u32 pde = LIMA_PDE(addr);
 		u32 pte = LIMA_PTE(addr);
+		u32 *pd, *pt;
 
-		if (!vm->pts[pde].cpu) {
-			vm->pts[pde].cpu =
-				dma_alloc_wc(vm->dev->dev, LIMA_PAGE_SIZE,
-					     &vm->pts[pde].dma, GFP_KERNEL);
-			if (!vm->pts[pde].cpu) {
-				if (addr != start)
-					lima_vm_unmap_page_table(vm, start, addr - 1);
-				return -ENOMEM;
+		if (vm->pt[pde])
+			pt = lima_bo_kmap(vm->pt[pde]);
+		else {
+			vm->pt[pde] = lima_bo_create(
+				vm->dev, LIMA_PAGE_SIZE, 0, ttm_bo_type_kernel,
+				NULL, vm->pd->tbo.resv);
+			if (IS_ERR(vm->pt[pde])) {
+				err = PTR_ERR(vm->pt[pde]);
+				goto err_out;
 			}
-			memset(vm->pts[pde].cpu, 0, LIMA_PAGE_SIZE);
-			vm->pd.cpu[pde] = vm->pts[pde].dma | LIMA_VM_FLAG_PRESENT;
-			vm->pd.dma++;
+
+			pt = lima_bo_kmap(vm->pt[pde]);
+			if (IS_ERR(pt)) {
+				err = PTR_ERR(pt);
+				goto err_out;
+			}
+
+			pd = lima_bo_kmap(vm->pd);
+			pd[pde] = *lima_bo_get_pages(vm->pt[pde]) | LIMA_VM_FLAG_PRESENT;
 		}
 
-		/* dma address should be 4K aligned, so use the lower 12 bit
-		 * as a reference count, 12bit is enough for 1024 max count
-		 */
-		vm->pts[pde].dma++;
-		vm->pts[pde].cpu[pte] = dma[i++] | LIMA_VM_FLAGS_CACHE;
+		pt[pte] = dma[i++] | LIMA_VM_FLAGS_CACHE;
 	}
 
 	return 0;
-}
 
-int lima_vm_map(struct lima_vm *vm, dma_addr_t *pages_dma,
-		struct lima_bo_va_mapping *mapping)
-{
-	int err;
-	struct lima_bo_va_mapping *it;
-
-	mutex_lock(&vm->lock);
-
-	it = lima_vm_it_iter_first(&vm->va, mapping->start, mapping->last);
-	if (it) {
-		dev_err(vm->dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
-			mapping->start, mapping->last, it->start, it->last);
-		err = -EINVAL;
-		goto err_out0;
-	}
-
-	err = lima_vm_map_page_table(
-		vm, pages_dma, mapping->start, mapping->last);
-	if (err)
-		goto err_out0;
-
-	lima_vm_it_insert(mapping, &vm->va);
-
-	mutex_unlock(&vm->lock);
-	return 0;
-
-err_out0:
-	mutex_unlock(&vm->lock);
+err_out:
+	if (addr != start)
+		lima_vm_unmap_page_table(vm, start, addr - 1);
 	return err;
 }
 
-int lima_vm_unmap(struct lima_vm *vm, struct lima_bo_va_mapping *mapping)
+static struct lima_bo_va *
+lima_vm_bo_find(struct lima_vm *vm, struct lima_bo *bo)
 {
-	mutex_lock(&vm->lock);
+	struct lima_bo_va *bo_va, *ret = NULL;
 
+	list_for_each_entry(bo_va, &bo->va, list) {
+		if (bo_va->vm == vm) {
+			ret = bo_va;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+int lima_vm_bo_map(struct lima_vm *vm, struct lima_bo *bo, u32 start)
+{
+	int err;
+	struct lima_bo_va_mapping *it, *mapping;
+	u32 end = start + bo->gem.size - 1;
+	dma_addr_t *pages_dma = lima_bo_get_pages(bo);
+	struct lima_bo_va *bo_va;
+
+	it = lima_vm_it_iter_first(&vm->va, start, end);
+	if (it) {
+		dev_dbg(bo->gem.dev->dev, "lima vm map va overlap %x-%x %x-%x\n",
+			start, end, it->start, it->last);
+		return -EINVAL;
+	}
+
+	mapping = kmalloc(sizeof(*mapping), GFP_KERNEL);
+	if (!mapping)
+		return -ENOMEM;
+	mapping->start = start;
+	mapping->last = end;
+
+	err = lima_vm_map_page_table(vm, pages_dma, start, end);
+	if (err) {
+		kfree(mapping);
+		return err;
+	}
+
+	lima_vm_it_insert(mapping, &vm->va);
+
+	bo_va = lima_vm_bo_find(vm, bo);
+	list_add_tail(&mapping->list, &bo_va->mapping);
+
+	return 0;
+}
+
+static void lima_vm_unmap(struct lima_vm *vm,
+			  struct lima_bo_va_mapping *mapping)
+{
 	lima_vm_it_remove(mapping, &vm->va);
 
 	lima_vm_unmap_page_table(vm, mapping->start, mapping->last);
 
-	mutex_unlock(&vm->lock);
+	list_del(&mapping->list);
+	kfree(mapping);
+}
 
-	/* TODO: zap MMU using this vm in case buggy user app
-	 * free bo during GP/PP running which may corrupt kernel
-	 * reusing this memory. */
+int lima_vm_bo_unmap(struct lima_vm *vm, struct lima_bo *bo, u32 start)
+{
+	struct lima_bo_va *bo_va;
+	struct lima_bo_va_mapping *mapping;
+	int err;
 
+	bo_va = lima_vm_bo_find(vm, bo);
+	list_for_each_entry(mapping, &bo_va->mapping, list) {
+		if (mapping->start == start) {
+			/* wait bo idle before unmap it from vm */
+			err = ttm_bo_wait(&bo->tbo, false, false);
+			if (err) {
+				dev_err(vm->dev->dev, "bo unmap fail to "
+					"wait bo (%d)\n", err);
+				return err;
+			}
+		        lima_vm_unmap(vm, mapping);
+			break;
+		}
+	}
+
+	return 0;
+}
+
+int lima_vm_bo_add(struct lima_vm *vm, struct lima_bo *bo)
+{
+	struct lima_bo_va *bo_va;
+
+	bo_va = lima_vm_bo_find(vm, bo);
+	if (bo_va) {
+		bo_va->ref_count++;
+		return 0;
+	}
+
+	bo_va = kmalloc(sizeof(*bo_va), GFP_KERNEL);
+	if (!bo_va)
+		return -ENOMEM;
+
+	bo_va->vm = vm;
+	bo_va->ref_count = 1;
+	INIT_LIST_HEAD(&bo_va->mapping);
+	list_add_tail(&bo_va->list, &bo->va);
+	return 0;
+}
+
+int lima_vm_bo_del(struct lima_vm *vm, struct lima_bo *bo)
+{
+	struct lima_bo_va *bo_va;
+	struct lima_bo_va_mapping *mapping, *tmp;
+	int err;
+
+	bo_va = lima_vm_bo_find(vm, bo);
+	if (--bo_va->ref_count > 0)
+		return 0;
+
+	/* wait bo idle before unmap it from vm */
+	err = ttm_bo_wait(&bo->tbo, false, false);
+	if (err) {
+		dev_err(vm->dev->dev, "bo del fail to wait bo (%d)\n", err);
+		return err;
+	}
+
+	list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
+	        lima_vm_unmap(vm, mapping);
+	}
+	list_del(&bo_va->list);
+	kfree(bo_va);
 	return 0;
 }
 
 struct lima_vm *lima_vm_create(struct lima_device *dev)
 {
 	struct lima_vm *vm;
+	void *pd;
 
-	vm = kvzalloc(sizeof(*vm), GFP_KERNEL);
+	vm = kzalloc(sizeof(*vm), GFP_KERNEL);
 	if (!vm)
 		return NULL;
 
 	vm->dev = dev;
 	vm->va = RB_ROOT_CACHED;
-	mutex_init(&vm->lock);
 	kref_init(&vm->refcount);
 
-	vm->pd.cpu = dma_alloc_wc(dev->dev, LIMA_PAGE_SIZE, &vm->pd.dma, GFP_KERNEL);
-	if (!vm->pd.cpu)
+	vm->pd = lima_bo_create(dev, LIMA_PAGE_SIZE, 0,
+				ttm_bo_type_kernel, NULL, NULL);
+	if (IS_ERR(vm->pd))
 		goto err_out0;
-	memset(vm->pd.cpu, 0, LIMA_PAGE_SIZE);
+
+	pd = lima_bo_kmap(vm->pd);
+	if (IS_ERR(pd))
+		goto err_out1;
 
 	if (dev->dlbu_cpu) {
 		int err = lima_vm_map_page_table(
@@ -175,9 +282,9 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 	return vm;
 
 err_out1:
-	dma_free_wc(dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu, vm->pd.dma);
+	lima_bo_unref(vm->pd);
 err_out0:
-	kvfree(vm);
+	kfree(vm);
 	return NULL;
 }
 
@@ -191,41 +298,33 @@ void lima_vm_release(struct kref *kref)
 		dev_err(dev->dev, "still active bo inside vm\n");
 	}
 
-	for (i = 0; (vm->pd.dma & LIMA_PAGE_MASK) && i < LIMA_PAGE_ENT_NUM; i++) {
-		if (vm->pts[i].cpu) {
-			dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE,
-				    vm->pts[i].cpu, vm->pts[i].dma & ~LIMA_PAGE_MASK);
-			vm->pd.dma--;
-		}
+	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
+		if (vm->pt[i])
+			lima_bo_unref(vm->pt[i]);
 	}
 
-	if (vm->pd.cpu)
-		dma_free_wc(vm->dev->dev, LIMA_PAGE_SIZE, vm->pd.cpu,
-			    vm->pd.dma & ~LIMA_PAGE_MASK);
+	if (vm->pd)
+	        lima_bo_unref(vm->pd);
 
-	kvfree(vm);
+	kfree(vm);
 }
 
 void lima_vm_print(struct lima_vm *vm)
 {
 	int i, j;
+	u32 *pd = lima_bo_kmap(vm->pd);
 
 	/* to avoid the defined by not used warning */
 	(void)&lima_vm_it_iter_next;
 
-	if (!vm->pd.cpu)
-		return;
-
 	for (i = 0; i < LIMA_PAGE_ENT_NUM; i++) {
-		if (vm->pd.cpu[i]) {
-			printk(KERN_INFO "lima vm pd %03x:%08x\n", i, vm->pd.cpu[i]);
-			if ((vm->pd.cpu[i] & ~LIMA_VM_FLAG_MASK) != vm->pts[i].dma)
-				printk(KERN_INFO "pd %x not match pt %x\n",
-				       i, (u32)vm->pts[i].dma);
+		if (pd[i]) {
+			u32 *pt = lima_bo_kmap(vm->pt[i]);
+
+			printk(KERN_INFO "lima vm pd %03x:%08x\n", i, pd[i]);
 			for (j = 0; j < LIMA_PAGE_ENT_NUM; j++) {
-				if (vm->pts[i].cpu[j])
-					printk(KERN_INFO "  pt %03x:%08x\n",
-					       j, vm->pts[i].cpu[j]);
+				if (pt[j])
+					printk(KERN_INFO "  pt %03x:%08x\n", j, pt[j]);
 			}
 		}
 	}

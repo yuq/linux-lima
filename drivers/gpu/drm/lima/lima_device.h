@@ -22,10 +22,13 @@
 #ifndef __LIMA_DEVICE_H__
 #define __LIMA_DEVICE_H__
 
+#include <drm/drm_device.h>
+
 #include "lima_sched.h"
+#include "lima_ttm.h"
 
 enum lima_gpu_id {
-        lima_gpu_mali400 = 0,
+	lima_gpu_mali400 = 0,
 	lima_gpu_mali450,
 	lima_gpu_num,
 };
@@ -103,6 +106,8 @@ struct lima_device {
 	struct lima_ip ip[lima_ip_num];
 	struct lima_sched_pipe pipe[lima_pipe_num];
 
+	struct lima_mman mman;
+
 	struct lima_vm *empty_vm;
 	uint64_t va_start;
 	uint64_t va_end;
@@ -110,6 +115,18 @@ struct lima_device {
 	u32 *dlbu_cpu;
 	dma_addr_t dlbu_dma;
 };
+
+static inline struct lima_device *
+to_lima_dev(struct drm_device *dev)
+{
+	return dev->dev_private;
+}
+
+static inline struct lima_device *
+ttm_to_lima_dev(struct ttm_bo_device *dev)
+{
+	return container_of(dev, struct lima_device, mman.bdev);
+}
 
 int lima_device_init(struct lima_device *ldev);
 void lima_device_fini(struct lima_device *ldev);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Lima Project
+ * Copyright (C) 2018 Lima Project
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -19,54 +19,26 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef __LIMA_DRV_H__
-#define __LIMA_DRV_H__
+#ifndef __LIMA_TTM_H__
+#define __LIMA_TTM_H__
 
-#include <drm/drmP.h>
-#include <drm/ttm/ttm_execbuf_util.h>
+#include <drm/ttm/ttm_bo_driver.h>
 
-#include "lima_ctx.h"
+struct lima_mman {
+	struct ttm_bo_global_ref bo_global_ref;
+	struct drm_global_reference mem_global_ref;
+	struct ttm_bo_device bdev;
+	bool mem_global_referenced;
+};
 
-extern int lima_sched_timeout_ms;
-extern int lima_sched_max_tasks;
-extern int lima_max_mem;
+struct lima_ttm_tt {
+	struct ttm_dma_tt ttm;
+};
 
-struct lima_vm;
+struct lima_device;
 struct lima_bo;
-struct lima_sched_task;
 
-struct drm_lima_gem_submit_bo;
-
-#define DRM_FILE_PAGE_OFFSET (0x100000000ULL >> PAGE_SHIFT)
-
-struct lima_drm_priv {
-	struct lima_vm *vm;
-	struct lima_ctx_mgr ctx_mgr;
-};
-
-struct lima_submit {
-	struct lima_ctx *ctx;
-	int pipe;
-
-	struct drm_lima_gem_submit_bo *bos;
-	struct ttm_validate_buffer *vbs;
-	u32 nr_bos;
-
-	struct ttm_validate_buffer vm_pd_vb;
-	struct ww_acquire_ctx ticket;
-	struct list_head duplicates;
-	struct list_head validated;
-
-	struct lima_sched_task *task;
-
-	uint32_t fence;
-	uint32_t done;
-};
-
-static inline struct lima_drm_priv *
-to_lima_drm_priv(struct drm_file *file)
-{
-	return file->driver_priv;
-}
+int lima_ttm_init(struct lima_device *dev);
+void lima_ttm_fini(struct lima_device *dev);
 
 #endif

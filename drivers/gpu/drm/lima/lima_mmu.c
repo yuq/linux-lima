@@ -27,6 +27,7 @@
 #include "lima_device.h"
 #include "lima_mmu.h"
 #include "lima_vm.h"
+#include "lima_object.h"
 
 #define LIMA_MMU_DTE_ADDR		  0x0000
 #define LIMA_MMU_STATUS			  0x0004
@@ -132,7 +133,7 @@ int lima_mmu_init(struct lima_ip *ip)
 	}
 
 	mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
-	mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
+	mmu_write(DTE_ADDR, *lima_bo_get_pages(dev->empty_vm->pd));
 	return lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
 				     mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
 }
@@ -150,7 +151,7 @@ void lima_mmu_switch_vm(struct lima_ip *ip, struct lima_vm *vm)
 			      mmu_read(STATUS) & LIMA_MMU_STATUS_STALL_ACTIVE);
 
 	if (vm)
-		mmu_write(DTE_ADDR, vm->pd.dma);
+		mmu_write(DTE_ADDR, *lima_bo_get_pages(vm->pd));
 
 	/* flush the TLB */
 	mmu_write(COMMAND, LIMA_MMU_COMMAND_ZAP_CACHE);
@@ -171,7 +172,7 @@ void lima_mmu_page_fault_resume(struct lima_ip *ip)
 		mmu_write(DTE_ADDR, 0xCAFEBABE);
 		lima_mmu_send_command(LIMA_MMU_COMMAND_HARD_RESET, mmu_read(DTE_ADDR) == 0);
 	        mmu_write(INT_MASK, LIMA_MMU_INT_PAGE_FAULT | LIMA_MMU_INT_READ_BUS_ERROR);
-		mmu_write(DTE_ADDR, dev->empty_vm->pd.dma);
+		mmu_write(DTE_ADDR, *lima_bo_get_pages(dev->empty_vm->pd));
 		lima_mmu_send_command(LIMA_MMU_COMMAND_ENABLE_PAGING,
 				      mmu_read(STATUS) & LIMA_MMU_STATUS_PAGING_ENABLED);
 	}
