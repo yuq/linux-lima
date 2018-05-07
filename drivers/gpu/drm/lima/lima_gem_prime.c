@@ -20,87 +20,47 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drmP.h>
 #include <linux/dma-buf.h>
+#include <drm/drm_prime.h>
 
-#include "lima_gem.h"
+#include "lima_device.h"
+#include "lima_object.h"
 #include "lima_gem_prime.h"
-
-static void lima_bo_dma_buf_release(struct lima_bo *bo)
-{
-	if (bo->pages_dma_addr)
-		kfree(bo->pages_dma_addr);
-
-	if (bo->pages)
-		kfree(bo->pages);
-
-	drm_prime_gem_destroy(&bo->gem, bo->sgt);
-}
-
-static int lima_bo_dma_buf_mmap(struct lima_bo *bo, struct vm_area_struct *vma)
-{
-	return dma_buf_mmap(bo->gem.dma_buf, vma, 0);
-}
-
-static struct lima_bo_ops lima_bo_dma_buf_ops = {
-	.release = lima_bo_dma_buf_release,
-	.mmap = lima_bo_dma_buf_mmap,
-};
 
 struct drm_gem_object *lima_gem_prime_import_sg_table(
 	struct drm_device *dev, struct dma_buf_attachment *attach,
 	struct sg_table *sgt)
 {
+	struct reservation_object *resv = attach->dmabuf->resv;
+	struct lima_device *ldev = to_lima_dev(dev);
 	struct lima_bo *bo;
-	struct drm_gem_object *ret;
-	int err, npages = attach->dmabuf->size >> PAGE_SHIFT;
 
-	bo = lima_gem_create_bo(dev, attach->dmabuf->size, 0);
-	if (!bo)
-		return ERR_PTR(-ENOMEM);
+	ww_mutex_lock(&resv->lock, NULL);
 
-	bo->type = lima_bo_type_dma_buf;
-	bo->ops = &lima_bo_dma_buf_ops;
-	bo->sgt = sgt;
-
-	bo->pages_dma_addr = kzalloc(npages * sizeof(dma_addr_t), GFP_KERNEL);
-	if (!bo->pages_dma_addr) {
-		ret = ERR_PTR(-ENOMEM);
+	bo = lima_bo_create(ldev, attach->dmabuf->size, 0,
+			    ttm_bo_type_sg, sgt, resv);
+	if (IS_ERR(bo))
 		goto err_out;
-	}
 
-	bo->pages = kzalloc(npages * sizeof(*bo->pages), GFP_KERNEL);
-	if (!bo->pages) {
-		ret = ERR_PTR(-ENOMEM);
-		goto err_out;
-	}
-
-	err = drm_prime_sg_to_page_addr_arrays(
-		sgt, bo->pages, bo->pages_dma_addr, npages);
-	if (err) {
-		ret = ERR_PTR(err);
-		goto err_out;
-	}
-
-	bo->resv = attach->dmabuf->resv;
-
+	ww_mutex_unlock(&resv->lock);
 	return &bo->gem;
 
 err_out:
-	lima_gem_free_object(&bo->gem);
-	return ret;
+	ww_mutex_unlock(&resv->lock);
+	return (void *)bo;
 }
 
 struct reservation_object *lima_gem_prime_res_obj(struct drm_gem_object *obj)
 {
         struct lima_bo *bo = to_lima_bo(obj);
 
-	return bo->resv;
+	return bo->tbo.resv;
 }
 
 struct sg_table *lima_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
 	struct lima_bo *bo = to_lima_bo(obj);
+	int npages = bo->tbo.num_pages;
 
-	return drm_prime_pages_to_sg(bo->pages, obj->size >> PAGE_SHIFT);
+	return drm_prime_pages_to_sg(bo->tbo.ttm->pages, npages);
 }

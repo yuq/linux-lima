@@ -22,54 +22,8 @@
 #ifndef __LIMA_GEM_H__
 #define __LIMA_GEM_H__
 
-#include <drm/drm_gem.h>
-#include <linux/reservation.h>
-
 struct lima_bo;
 struct lima_submit;
-struct lima_vm;
-
-struct lima_bo_va {
-	struct list_head list;
-	unsigned ref_count;
-
-	struct list_head mapping;
-
-	struct lima_vm *vm;
-};
-
-struct lima_bo_ops {
-	void (*release)(struct lima_bo *);
-	int (*mmap)(struct lima_bo *, struct vm_area_struct *);
-};
-
-struct lima_bo {
-	struct drm_gem_object gem;
-
-	enum lima_bo_type {
-		lima_bo_type_shmem,
-		lima_bo_type_dma_buf,
-	} type;
-
-	struct page **pages;
-	dma_addr_t *pages_dma_addr;	
-	struct sg_table *sgt;
-
-	struct lima_bo_ops *ops;
-
-	struct mutex lock;
-	struct list_head va;
-
-	/* normally (resv == &_resv) except for imported bo's */
-	struct reservation_object *resv;
-	struct reservation_object _resv;
-};
-
-static inline struct lima_bo *
-to_lima_bo(struct drm_gem_object *obj)
-{
-	return container_of(obj, struct lima_bo, gem);
-}
 
 struct lima_bo *lima_gem_create_bo(struct drm_device *dev, u32 size, u32 flags);
 int lima_gem_create_handle(struct drm_device *dev, struct drm_file *file,

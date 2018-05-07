@@ -12,6 +12,8 @@ lima-y := \
 	lima_ctx.o \
 	lima_gem_prime.o \
 	lima_dlbu.o \
-	lima_bcast.o
+	lima_bcast.o \
+	lima_ttm.o \
+	lima_object.o
 
 obj-$(CONFIG_DRM_LIMA) += lima.o
