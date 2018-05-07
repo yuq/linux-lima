@@ -185,7 +185,7 @@ int lima_sched_context_init(struct lima_sched_pipe *pipe,
 	if (!context->fences)
 		return -ENOMEM;
 
-	spin_lock_init(&context->lock);
+	mutex_init(&context->lock);
 	err = drm_sched_entity_init(&pipe->base, &context->base, rq,
 				    lima_sched_max_tasks, guilty);
 	if (err) {
@@ -202,6 +202,8 @@ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
 {
 	drm_sched_entity_fini(&pipe->base, &context->base);
 
+	mutex_destroy(&context->lock);
+
 	if (context->fences)
 		kfree(context->fences);
 }
@@ -213,7 +215,7 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 	uint32_t seq, idx, i, n;
 	struct dma_fence *other;
 
-	spin_lock(&context->lock);
+	mutex_lock(&context->lock);
 
 	seq = context->sequence;
 	idx = seq & (lima_sched_max_tasks - 1);
@@ -236,7 +238,7 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 			break;
 	}
 
-	spin_unlock(&context->lock);
+	mutex_unlock(&context->lock);
 
 	dma_fence_put(other);
 
@@ -250,7 +252,7 @@ static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context 
 	struct dma_fence *fence;
 	int idx;
 
-	spin_lock(&context->lock);
+	mutex_lock(&context->lock);
 
 	/* assume no overflow */
 	if (seq >= context->sequence) {
@@ -267,7 +269,7 @@ static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context 
 	fence = dma_fence_get(context->fences[idx]);
 
 out:
-	spin_unlock(&context->lock);
+	mutex_unlock(&context->lock);
 
 	return fence;
 }

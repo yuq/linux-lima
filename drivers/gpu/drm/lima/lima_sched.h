@@ -42,7 +42,7 @@ struct lima_sched_task {
 
 struct lima_sched_context {
 	struct drm_sched_entity base;
-	spinlock_t lock;
+	struct mutex lock;
 	struct dma_fence **fences;
 	uint32_t sequence;
 };
