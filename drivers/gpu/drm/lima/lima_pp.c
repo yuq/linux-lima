@@ -243,27 +243,21 @@ static int lima_pp_soft_reset_async_wait(struct lima_ip *ip)
 	return err;
 }
 
-static void lima_pp_start_task(struct lima_ip *ip,
-			       struct drm_lima_pp_frame_reg *frame,
-			       struct drm_lima_pp_wb_reg *wb,
+static void lima_pp_start_task(struct lima_ip *ip, u32 *frame, u32 *wb,
 			       bool skip_stack_addr)
 {
-	const int num_frame_reg = 23, num_wb_reg = 12;
-	int i, j;
+	int i, j, n = 0;
 
-	for (i = 0; i < num_frame_reg; i++) {
-		u32 *frame_reg = (void *)frame;
-
+	for (i = 0; i < LIMA_PP_FRAME_REG_NUM; i++) {
 		if (skip_stack_addr && i * 4 == LIMA_PP_STACK)
 			continue;
 
-		writel(frame_reg[i], ip->iomem + LIMA_PP_FRAME + i * 4);
+		writel(frame[i], ip->iomem + LIMA_PP_FRAME + i * 4);
 	}
 
 	for (i = 0; i < 3; i++) {
-		u32 *wb_reg = (void *)(wb + i);
-		for (j = 0; j < num_wb_reg; j++)
-			writel(wb_reg[j], ip->iomem + LIMA_PP_WB(i) + j * 4);
+		for (j = 0; j < LIMA_PP_WB_REG_NUM; j++)
+			writel(wb[n++], ip->iomem + LIMA_PP_WB(i) + j * 4);
 	}
 
 	pp_write(CTRL, LIMA_PP_CTRL_START_RENDERING);
@@ -396,7 +390,7 @@ static void lima_pp_task_run(struct lima_sched_pipe *pipe,
 		pipe->done = 0;
 		atomic_set(&pipe->task, pipe->num_processor);
 
-		frame->frame.plbu_array_address = LIMA_VA_RESERVE_DLBU;
+		frame->frame[LIMA_PP_FRAME >> 2] = LIMA_VA_RESERVE_DLBU;
 		lima_dlbu_set_reg(dev->ip + lima_ip_dlbu, frame->dlbu_regs);
 
 		lima_pp_soft_reset_async_wait(pipe->bcast_processor);
@@ -406,7 +400,7 @@ static void lima_pp_task_run(struct lima_sched_pipe *pipe,
 			pp_write(STACK, frame->fragment_stack_address[i]);
 		}
 
-		lima_pp_start_task(pipe->bcast_processor, &frame->frame,
+		lima_pp_start_task(pipe->bcast_processor, frame->frame,
 				   frame->wb, true);
 	}
 	else {
@@ -416,15 +410,14 @@ static void lima_pp_task_run(struct lima_sched_pipe *pipe,
 		atomic_set(&pipe->task, frame->num_pp);
 
 		for (i = 0; i < frame->num_pp; i++) {
-			frame->frame.plbu_array_address =
+			frame->frame[LIMA_PP_FRAME >> 2] =
 				frame->plbu_array_address[i];
-			frame->frame.fragment_stack_address =
+			frame->frame[LIMA_PP_STACK >> 2] =
 				frame->fragment_stack_address[i];
 
 			lima_pp_soft_reset_async_wait(pipe->processor[i]);
 
-			lima_pp_start_task(pipe->processor[i],
-					   &frame->frame,
+			lima_pp_start_task(pipe->processor[i], frame->frame,
 					   frame->wb, false);
 		}
 	}

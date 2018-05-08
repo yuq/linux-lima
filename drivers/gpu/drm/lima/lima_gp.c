@@ -208,16 +208,22 @@ static int lima_gp_soft_reset_async_wait(struct lima_ip *ip)
 static int lima_gp_task_validate(struct lima_sched_pipe *pipe,
 				 struct lima_sched_task *task)
 {
-	struct drm_lima_m400_gp_frame *f = task->frame;
+	struct drm_lima_gp_frame *frame = task->frame;
+	u32 *f = frame->frame;
 	(void)pipe;
 
-	if (f->vs_cmd_start > f->vs_cmd_end ||
-	    f->plbu_cmd_start > f->plbu_cmd_end ||
-	    f->tile_heap_start > f->tile_heap_end)
+	if (f[LIMA_GP_VSCL_START_ADDR >> 2] >
+	    f[LIMA_GP_VSCL_END_ADDR >> 2] ||
+	    f[LIMA_GP_PLBUCL_START_ADDR >> 2] >
+	    f[LIMA_GP_PLBUCL_END_ADDR >> 2] ||
+	    f[LIMA_GP_PLBU_ALLOC_START_ADDR >> 2] >
+	    f[LIMA_GP_PLBU_ALLOC_END_ADDR >> 2])
 		return -EINVAL;
 
-	if (f->vs_cmd_start == f->vs_cmd_end &&
-	    f->plbu_cmd_start == f->plbu_cmd_end)
+	if (f[LIMA_GP_VSCL_START_ADDR >> 2] ==
+	    f[LIMA_GP_VSCL_END_ADDR >> 2] &&
+	    f[LIMA_GP_PLBUCL_START_ADDR >> 2] ==
+	    f[LIMA_GP_PLBUCL_END_ADDR >> 2])
 		return -EINVAL;
 
 	return 0;
@@ -227,23 +233,23 @@ static void lima_gp_task_run(struct lima_sched_pipe *pipe,
 			     struct lima_sched_task *task)
 {
 	struct lima_ip *ip = pipe->processor[0];
-	struct drm_lima_m400_gp_frame *frame = task->frame;
+	struct drm_lima_gp_frame *frame = task->frame;
+	u32 *f = frame->frame;
 	u32 cmd = 0;
+	int i;
 
-	if (frame->vs_cmd_start != frame->vs_cmd_end)
+	if (f[LIMA_GP_VSCL_START_ADDR >> 2] !=
+	    f[LIMA_GP_VSCL_END_ADDR >> 2])
 		cmd |= LIMA_GP_CMD_START_VS;
-	if (frame->plbu_cmd_start != frame->plbu_cmd_end)
+	if (f[LIMA_GP_PLBUCL_START_ADDR >> 2] !=
+	    f[LIMA_GP_PLBUCL_END_ADDR >> 2])
 		cmd |= LIMA_GP_CMD_START_PLBU;
 
 	/* before any hw ops, wait last success task async soft reset */
 	lima_gp_soft_reset_async_wait(ip);
 
-	gp_write(VSCL_START_ADDR, frame->vs_cmd_start);
-	gp_write(VSCL_END_ADDR, frame->vs_cmd_end);
-	gp_write(PLBUCL_START_ADDR, frame->plbu_cmd_start);
-	gp_write(PLBUCL_END_ADDR, frame->plbu_cmd_end);
-	gp_write(PLBU_ALLOC_START_ADDR, frame->tile_heap_start);
-	gp_write(PLBU_ALLOC_END_ADDR, frame->tile_heap_end);
+	for (i = 0; i < LIMA_GP_FRAME_REG_NUM; i++)
+		writel(f[i], ip->iomem + LIMA_GP_VSCL_START_ADDR + i * 4);
 
 	gp_write(CMD, LIMA_GP_CMD_UPDATE_PLBU_ALLOC);
 	gp_write(CMD, cmd);
@@ -351,7 +357,7 @@ void lima_gp_fini(struct lima_ip *ip)
 
 int lima_gp_pipe_init(struct lima_device *dev)
 {
-	int frame_size = sizeof(struct drm_lima_m400_gp_frame);
+	int frame_size = sizeof(struct drm_lima_gp_frame);
 	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
 
 	if (!lima_gp_task_slab) {
