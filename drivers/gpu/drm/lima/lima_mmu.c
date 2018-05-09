@@ -28,32 +28,7 @@
 #include "lima_mmu.h"
 #include "lima_vm.h"
 #include "lima_object.h"
-
-#define LIMA_MMU_DTE_ADDR		  0x0000
-#define LIMA_MMU_STATUS			  0x0004
-#define   LIMA_MMU_STATUS_PAGING_ENABLED      (1 << 0)
-#define   LIMA_MMU_STATUS_PAGE_FAULT_ACTIVE   (1 << 1)
-#define   LIMA_MMU_STATUS_STALL_ACTIVE        (1 << 2)
-#define   LIMA_MMU_STATUS_IDLE                (1 << 3)
-#define   LIMA_MMU_STATUS_REPLAY_BUFFER_EMPTY (1 << 4)
-#define   LIMA_MMU_STATUS_PAGE_FAULT_IS_WRITE (1 << 5)
-#define   LIMA_MMU_STATUS_BUS_ID(x)           ((x >> 6) & 0x1F)
-#define LIMA_MMU_COMMAND		  0x0008
-#define   LIMA_MMU_COMMAND_ENABLE_PAGING    0x00
-#define   LIMA_MMU_COMMAND_DISABLE_PAGING   0x01
-#define   LIMA_MMU_COMMAND_ENABLE_STALL     0x02
-#define   LIMA_MMU_COMMAND_DISABLE_STALL    0x03
-#define   LIMA_MMU_COMMAND_ZAP_CACHE        0x04
-#define   LIMA_MMU_COMMAND_PAGE_FAULT_DONE  0x05
-#define   LIMA_MMU_COMMAND_HARD_RESET       0x06
-#define LIMA_MMU_PAGE_FAULT_ADDR          0x000C
-#define LIMA_MMU_ZAP_ONE_LINE	          0x0010
-#define LIMA_MMU_INT_RAWSTAT	          0x0014
-#define LIMA_MMU_INT_CLEAR		  0x0018
-#define LIMA_MMU_INT_MASK		  0x001C
-#define   LIMA_MMU_INT_PAGE_FAULT           0x01
-#define   LIMA_MMU_INT_READ_BUS_ERROR       0x02
-#define LIMA_MMU_INT_STATUS		  0x0020
+#include "lima_regs.h"
 
 #define mmu_write(reg, data) writel(data, ip->iomem + LIMA_MMU_##reg)
 #define mmu_read(reg) readl(ip->iomem + LIMA_MMU_##reg)

@@ -26,28 +26,7 @@
 
 #include "lima_device.h"
 #include "lima_pmu.h"
-
-#define LIMA_PMU_POWER_UP                  0x00
-#define LIMA_PMU_POWER_DOWN                0x04
-#define   LIMA_PMU_POWER_GP0_MASK          (1 << 0)
-#define   LIMA_PMU_POWER_L2_MASK           (1 << 1)
-#define   LIMA_PMU_POWER_PP_MASK(i)        (1 << (2 + i))
-
-/*
- * On Mali450 each block automatically starts up its corresponding L2
- * and the PPs are not fully independent controllable.
- * Instead PP0, PP1-3 and PP4-7 can be turned on or off.
- */
-#define   LIMA450_PMU_POWER_PP0_MASK       BIT(1)
-#define   LIMA450_PMU_POWER_PP13_MASK      BIT(2)
-#define   LIMA450_PMU_POWER_PP47_MASK      BIT(3)
-
-#define LIMA_PMU_STATUS                    0x08
-#define LIMA_PMU_INT_MASK                  0x0C
-#define LIMA_PMU_INT_RAWSTAT               0x10
-#define LIMA_PMU_INT_CLEAR                 0x18
-#define   LIMA_PMU_INT_CMD_MASK            (1 << 0)
-#define LIMA_PMU_SW_DELAY                  0x1C
+#include "lima_regs.h"
 
 #define pmu_write(reg, data) writel(data, ip->iomem + LIMA_PMU_##reg)
 #define pmu_read(reg) readl(ip->iomem + LIMA_PMU_##reg)

@@ -25,9 +25,7 @@
 
 #include "lima_device.h"
 #include "lima_bcast.h"
-
-#define LIMA_BCAST_BROADCAST_MASK    0x0
-#define LIMA_BCAST_INTERRUPT_MASK    0x4
+#include "lima_regs.h"
 
 #define bcast_write(reg, data) writel(data, ip->iomem + LIMA_BCAST_##reg)
 #define bcast_read(reg) readl(ip->iomem + LIMA_BCAST_##reg)

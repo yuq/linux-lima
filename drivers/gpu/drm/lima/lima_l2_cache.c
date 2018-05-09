@@ -25,22 +25,7 @@
 
 #include "lima_device.h"
 #include "lima_l2_cache.h"
-
-#define LIMA_L2_CACHE_SIZE		 0x0004
-#define LIMA_L2_CACHE_STATUS		 0x0008
-#define   LIMA_L2_CACHE_STATUS_COMMAND_BUSY  (1 << 0)
-#define   LIMA_L2_CACHE_STATUS_DATA_BUSY     (1 << 1)
-#define LIMA_L2_CACHE_COMMAND		 0x0010
-#define   LIMA_L2_CACHE_COMMAND_CLEAR_ALL    (1 << 0)
-#define LIMA_L2_CACHE_CLEAR_PAGE	 0x0014
-#define LIMA_L2_CACHE_MAX_READS		 0x0018
-#define LIMA_L2_CACHE_ENABLE		 0x001C
-#define   LIMA_L2_CACHE_ENABLE_ACCESS        (1 << 0)
-#define   LIMA_L2_CACHE_ENABLE_READ_ALLOCATE (1 << 1)
-#define LIMA_L2_CACHE_PERFCNT_SRC0	 0x0020
-#define LIMA_L2_CACHE_PERFCNT_VAL0	 0x0024
-#define LIMA_L2_CACHE_PERFCNT_SRC1	 0x0028
-#define LIMA_L2_CACHE_ERFCNT_VAL1	 0x002C
+#include "lima_regs.h"
 
 #define l2_cache_write(reg, data) writel(data, ip->iomem + LIMA_L2_CACHE_##reg)
 #define l2_cache_read(reg) readl(ip->iomem + LIMA_L2_CACHE_##reg)

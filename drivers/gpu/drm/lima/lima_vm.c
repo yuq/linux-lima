@@ -5,6 +5,7 @@
 #include "lima_device.h"
 #include "lima_vm.h"
 #include "lima_object.h"
+#include "lima_regs.h"
 
 struct lima_bo_va_mapping {
 	struct list_head list;
@@ -25,32 +26,6 @@ struct lima_bo_va {
 
 #define LIMA_PDE(va) (va >> 22)
 #define LIMA_PTE(va) ((va & 0x3FFFFF) >> 12)
-
-#define LIMA_VM_FLAG_PRESENT          (1 << 0)
-#define LIMA_VM_FLAG_READ_PERMISSION  (1 << 1)
-#define LIMA_VM_FLAG_WRITE_PERMISSION (1 << 2)
-#define LIMA_VM_FLAG_OVERRIDE_CACHE   (1 << 3)
-#define LIMA_VM_FLAG_WRITE_CACHEABLE  (1 << 4)
-#define LIMA_VM_FLAG_WRITE_ALLOCATE   (1 << 5)
-#define LIMA_VM_FLAG_WRITE_BUFFERABLE (1 << 6)
-#define LIMA_VM_FLAG_READ_CACHEABLE   (1 << 7)
-#define LIMA_VM_FLAG_READ_ALLOCATE    (1 << 8)
-#define LIMA_VM_FLAG_MASK             0x1FF
-
-#define LIMA_VM_FLAGS_CACHE (			 \
-		LIMA_VM_FLAG_PRESENT |		 \
-		LIMA_VM_FLAG_READ_PERMISSION |	 \
-		LIMA_VM_FLAG_WRITE_PERMISSION |	 \
-		LIMA_VM_FLAG_OVERRIDE_CACHE |	 \
-		LIMA_VM_FLAG_WRITE_CACHEABLE |	 \
-		LIMA_VM_FLAG_WRITE_BUFFERABLE |	 \
-		LIMA_VM_FLAG_READ_CACHEABLE |	 \
-		LIMA_VM_FLAG_READ_ALLOCATE )
-
-#define LIMA_VM_FLAGS_UNCACHE (			\
-		LIMA_VM_FLAG_PRESENT |		\
-		LIMA_VM_FLAG_READ_PERMISSION |	\
-		LIMA_VM_FLAG_WRITE_PERMISSION )
 
 #define START(node) ((node)->start)
 #define LAST(node) ((node)->last)
