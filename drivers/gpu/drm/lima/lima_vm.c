@@ -158,18 +158,10 @@ int lima_vm_bo_unmap(struct lima_vm *vm, struct lima_bo *bo, u32 start)
 {
 	struct lima_bo_va *bo_va;
 	struct lima_bo_va_mapping *mapping;
-	int err;
 
 	bo_va = lima_vm_bo_find(vm, bo);
 	list_for_each_entry(mapping, &bo_va->mapping, list) {
 		if (mapping->start == start) {
-			/* wait bo idle before unmap it from vm */
-			err = ttm_bo_wait(&bo->tbo, false, false);
-			if (err) {
-				dev_err(vm->dev->dev, "bo unmap fail to "
-					"wait bo (%d)\n", err);
-				return err;
-			}
 		        lima_vm_unmap(vm, mapping);
 			break;
 		}
@@ -203,18 +195,10 @@ int lima_vm_bo_del(struct lima_vm *vm, struct lima_bo *bo)
 {
 	struct lima_bo_va *bo_va;
 	struct lima_bo_va_mapping *mapping, *tmp;
-	int err;
 
 	bo_va = lima_vm_bo_find(vm, bo);
 	if (--bo_va->ref_count > 0)
 		return 0;
-
-	/* wait bo idle before unmap it from vm */
-	err = ttm_bo_wait(&bo->tbo, false, false);
-	if (err) {
-		dev_err(vm->dev->dev, "bo del fail to wait bo (%d)\n", err);
-		return err;
-	}
 
 	list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
 	        lima_vm_unmap(vm, mapping);
