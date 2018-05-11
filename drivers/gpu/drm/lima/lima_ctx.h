@@ -45,4 +45,7 @@ void lima_ctx_put(struct lima_ctx *ctx);
 void lima_ctx_mgr_init(struct lima_ctx_mgr *mgr);
 void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr);
 
+struct dma_fence *lima_ctx_get_native_fence(struct lima_ctx_mgr *mgr,
+					    u32 ctx, u32 pipe, u32 seq);
+
 #endif

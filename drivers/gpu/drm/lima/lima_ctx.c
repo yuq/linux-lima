@@ -122,3 +122,22 @@ void lima_ctx_mgr_fini(struct lima_ctx_mgr *mgr)
 
 	idr_destroy(&mgr->handles);
 }
+
+struct dma_fence *lima_ctx_get_native_fence(struct lima_ctx_mgr *mgr,
+					    u32 ctx, u32 pipe, u32 seq)
+{
+	struct lima_ctx *c;
+	struct dma_fence *ret;
+
+	if (pipe >= lima_pipe_num)
+		return ERR_PTR(-EINVAL);
+
+	c = lima_ctx_get(mgr, ctx);
+	if (!c)
+		return ERR_PTR(-ENOENT);
+
+	ret = lima_sched_context_get_fence(c->context + pipe, seq);
+
+	lima_ctx_put(c);
+	return ret;
+}

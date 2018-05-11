@@ -146,10 +146,10 @@ union drm_lima_gem_submit {
 };
 
 struct drm_lima_wait_fence {
-	__u32 pipe;        /* in */
-	__u32 fence;       /* in */
-	__u64 timeout_ns;  /* in */
 	__u32 ctx;         /* in */
+	__u32 pipe;        /* in */
+	__u64 timeout_ns;  /* in */
+	__u32 seq;         /* in */
 	__u32 _pad;
 };
 

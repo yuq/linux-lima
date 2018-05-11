@@ -196,24 +196,45 @@ out0:
 	return err;
 }
 
+static int lima_wait_fence(struct dma_fence *fence, u64 timeout_ns)
+{
+	signed long ret;
+
+	if (!timeout_ns)
+		ret = dma_fence_is_signaled(fence) ? 0 : -EBUSY;
+	else {
+		unsigned long timeout = lima_timeout_to_jiffies(timeout_ns);
+
+		/* must use long for result check because in 64bit arch int
+		 * will overflow if timeout is too large and get <0 result
+		 */
+		ret = dma_fence_wait_timeout(fence, true, timeout);
+		if (ret == 0)
+			ret = timeout ? -ETIMEDOUT : -EBUSY;
+		else if (ret > 0)
+			ret = 0;
+	}
+
+	return ret;
+}
+
 static int lima_ioctl_wait_fence(struct drm_device *dev, void *data, struct drm_file *file)
 {
 	struct drm_lima_wait_fence *args = data;
 	struct lima_drm_priv *priv = file->driver_priv;
-	struct lima_ctx *ctx;
-	int err;
+	struct dma_fence *fence;
+	int err = 0;
 
-	if (args->pipe >= lima_pipe_num)
-		return -EINVAL;
+	fence = lima_ctx_get_native_fence(&priv->ctx_mgr, args->ctx,
+					  args->pipe, args->seq);
+	if (IS_ERR(fence))
+		return PTR_ERR(fence);
 
-	ctx = lima_ctx_get(&priv->ctx_mgr, args->ctx);
-	if (!ctx)
-		return -ENOENT;
+	if (fence) {
+		err = lima_wait_fence(fence, args->timeout_ns);
+		dma_fence_put(fence);
+	}
 
-	err = lima_sched_context_wait_fence(ctx->context + args->pipe,
-					    args->fence, args->timeout_ns);
-
-	lima_ctx_put(ctx);
 	return err;
 }
 

@@ -287,25 +287,9 @@ static int lima_gem_add_deps(struct lima_ctx_mgr *mgr, struct lima_submit *submi
 		struct dma_fence *fence;
 
 		if (dep->type == LIMA_SUBMIT_DEP_FENCE) {
-			struct lima_ctx *ctx;
-
-			if (dep->fence.pipe >= lima_pipe_num) {
-				err = -EINVAL;
-				break;
-			}
-
-			ctx = lima_ctx_get(mgr, dep->fence.ctx);
-			if (!ctx) {
-				err = -ENOENT;
-				break;
-			}
-
-			fence = lima_sched_context_get_fence(
-				ctx->context + dep->fence.pipe,
+			fence = lima_ctx_get_native_fence(
+				mgr, dep->fence.ctx, dep->fence.pipe,
 				dep->fence.seq);
-
-			lima_ctx_put(ctx);
-
 			if (IS_ERR(fence)) {
 				err = PTR_ERR(fence);
 				break;
