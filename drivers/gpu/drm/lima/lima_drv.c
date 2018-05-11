@@ -105,6 +105,8 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	struct lima_device *ldev = to_lima_dev(dev);
 	struct lima_drm_priv *priv = file->driver_priv;
 	struct drm_lima_gem_submit_bo *bos;
+	struct ttm_validate_buffer *vbs;
+	union drm_lima_gem_submit_dep *deps = NULL;
 	struct lima_sched_pipe *pipe;
 	struct lima_sched_task *task;
 	struct lima_ctx *ctx;
@@ -114,11 +116,16 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	if (args->pipe >= lima_pipe_num || args->nr_bos == 0)
 		return -EINVAL;
 
+	if (args->flags & ~(LIMA_SUBMIT_FLAG_EXPLICIT_FENCE |
+			    LIMA_SUBMIT_FLAG_SYNC_FD_OUT))
+		return -EINVAL;
+
 	pipe = ldev->pipe + args->pipe;
 	if (args->frame_size != pipe->frame_size)
 		return -EINVAL;
 
-	size = args->nr_bos * (sizeof(*submit.bos) + sizeof(*submit.vbs));
+	size = args->nr_bos * (sizeof(*submit.bos) + sizeof(*submit.vbs)) +
+		args->nr_deps * sizeof(*submit.deps);
 	bos = kzalloc(size, GFP_KERNEL);
 	if (!bos)
 		return -ENOMEM;
@@ -127,6 +134,17 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 	if (copy_from_user(bos, u64_to_user_ptr(args->bos), size)) {
 		err = -EFAULT;
 		goto out0;
+	}
+
+	vbs = (void *)bos + size;
+
+	if (args->nr_deps) {
+		deps = (void *)vbs + args->nr_bos * sizeof(*submit.vbs);
+		size = args->nr_deps * sizeof(*submit.deps);
+		if (copy_from_user(deps, u64_to_user_ptr(args->deps), size)) {
+			err = -EFAULT;
+			goto out0;
+		}
 	}
 
 	task = kmem_cache_zalloc(pipe->task_slab, GFP_KERNEL);
@@ -153,16 +171,20 @@ static int lima_ioctl_gem_submit(struct drm_device *dev, void *data, struct drm_
 
 	submit.pipe = args->pipe;
 	submit.bos = bos;
-	submit.vbs = (void *)bos + size;
+	submit.vbs = vbs;
 	submit.nr_bos = args->nr_bos;
 	submit.task = task;
 	submit.ctx = ctx;
+	submit.deps = deps;
+	submit.nr_deps = args->nr_deps;
+	submit.flags = args->flags;
 
 	err = lima_gem_submit(file, &submit);
 	if (!err) {
 		struct drm_lima_gem_submit_out *out = data;
 		out->fence = submit.fence;
 		out->done = submit.done;
+		out->sync_fd = submit.sync_fd;
 	}
 
 	lima_ctx_put(ctx);

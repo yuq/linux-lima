@@ -23,6 +23,7 @@
 #include <drm/drmP.h>
 #include <linux/dma-mapping.h>
 #include <linux/pagemap.h>
+#include <linux/sync_file.h>
 
 #include <drm/lima_drm.h>
 
@@ -231,12 +232,24 @@ out:
 	return err;
 }
 
-static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bool write)
+static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo,
+			    bool write, bool explicit)
 {
 	int i, err;
 	struct dma_fence *f;
 	u64 context = task->base.s_fence->finished.context;
 
+	if (!write) {
+		err = reservation_object_reserve_shared(bo->tbo.resv);
+		if (err)
+			return err;
+	}
+
+	/* explicit sync use user passed dep fence */
+	if (explicit)
+		return 0;
+
+	/* implicit sync use bo fence in resv obj */
 	if (write) {
 		struct reservation_object_list *fobj =
 			reservation_object_get_list(bo->tbo.resv);
@@ -244,7 +257,8 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
 		if (fobj && fobj->shared_count > 0) {
 			for (i = 0; i < fobj->shared_count; i++) {
 				f = rcu_dereference_protected(
-					fobj->shared[i], reservation_object_held(bo->tbo.resv));
+					fobj->shared[i],
+					reservation_object_held(bo->tbo.resv));
 				if (f->context != context) {
 					err = lima_sched_task_add_dep(task, f);
 					if (err)
@@ -261,13 +275,63 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo, bo
 			return err;
 	}
 
-	if (!write) {
-		err = reservation_object_reserve_shared(bo->tbo.resv);
-		if (err)
-			return err;
+	return 0;
+}
+
+static int lima_gem_add_deps(struct lima_ctx_mgr *mgr, struct lima_submit *submit)
+{
+	int i, err = 0;
+
+	for (i = 0; i < submit->nr_deps; i++) {
+		union drm_lima_gem_submit_dep *dep = submit->deps + i;
+		struct dma_fence *fence;
+
+		if (dep->type == LIMA_SUBMIT_DEP_FENCE) {
+			struct lima_ctx *ctx;
+
+			if (dep->fence.pipe >= lima_pipe_num) {
+				err = -EINVAL;
+				break;
+			}
+
+			ctx = lima_ctx_get(mgr, dep->fence.ctx);
+			if (!ctx) {
+				err = -ENOENT;
+				break;
+			}
+
+			fence = lima_sched_context_get_fence(
+				ctx->context + dep->fence.pipe,
+				dep->fence.seq);
+
+			lima_ctx_put(ctx);
+
+			if (IS_ERR(fence)) {
+				err = PTR_ERR(fence);
+				break;
+			}
+		}
+		else if (dep->type == LIMA_SUBMIT_DEP_SYNC_FD) {
+			fence = sync_file_get_fence(dep->sync_fd.fd);
+			if (!fence) {
+				err = -EINVAL;
+				break;
+			}
+		}
+		else {
+			err = -EINVAL;
+			break;
+		}
+
+		if (fence) {
+			err = lima_sched_task_add_dep(submit->task, fence);
+			dma_fence_put(fence);
+			if (err)
+				break;
+		}
 	}
 
-	return 0;
+	return err;
 }
 
 int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
@@ -309,16 +373,44 @@ int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
 	if (err)
 		goto out1;
 
+	err = lima_gem_add_deps(&priv->ctx_mgr, submit);
+	if (err)
+		goto out2;
+
 	for (i = 0; i < submit->nr_bos; i++) {
 		struct ttm_validate_buffer *vb = submit->vbs + i;
 		struct lima_bo *bo = ttm_to_lima_bo(vb->bo);
-		err = lima_gem_sync_bo(submit->task, bo, !vb->shared);
+		err = lima_gem_sync_bo(
+			submit->task, bo, !vb->shared,
+			submit->flags & LIMA_SUBMIT_FLAG_EXPLICIT_FENCE);
 		if (err)
 			goto out2;
 	}
 
+	if (submit->flags & LIMA_SUBMIT_FLAG_SYNC_FD_OUT) {
+		struct sync_file *sync_file;
+		int fd;
+
+		fd = get_unused_fd_flags(O_CLOEXEC);
+		if (fd < 0) {
+			err = fd;
+			goto out2;
+		}
+
+		sync_file = sync_file_create(
+			&submit->task->base.s_fence->finished);
+		if (!sync_file) {
+			put_unused_fd(fd);
+			err = -ENOMEM;
+			goto out2;
+		}
+		fd_install(fd, sync_file->file);
+		submit->sync_fd = fd;
+	}
+
 	submit->fence = lima_sched_context_queue_task(
-		submit->ctx->context + submit->pipe, submit->task, &submit->done);
+		submit->ctx->context + submit->pipe, submit->task,
+		&submit->done);
 
 	ttm_eu_fence_buffer_objects(&submit->ticket, &submit->validated,
 				    &submit->task->base.s_fence->finished);

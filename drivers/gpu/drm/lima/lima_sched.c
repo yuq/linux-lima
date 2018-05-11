@@ -246,8 +246,8 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 	return seq;
 }
 
-static struct dma_fence *lima_sched_context_get_fence(struct lima_sched_context *context,
-						      uint32_t seq)
+struct dma_fence *lima_sched_context_get_fence(
+	struct lima_sched_context *context, uint32_t seq)
 {
 	struct dma_fence *fence;
 	int idx;

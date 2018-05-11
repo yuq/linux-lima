@@ -105,6 +105,8 @@ void lima_sched_context_fini(struct lima_sched_pipe *pipe,
 uint32_t lima_sched_context_queue_task(struct lima_sched_context *context,
 				       struct lima_sched_task *task,
 				       uint32_t *done);
+struct dma_fence *lima_sched_context_get_fence(
+	struct lima_sched_context *context, uint32_t seq);
 int lima_sched_context_wait_fence(struct lima_sched_context *context,
 				  u32 fence, u64 timeout_ns);
 

@@ -47,6 +47,7 @@ struct lima_drm_priv {
 struct lima_submit {
 	struct lima_ctx *ctx;
 	int pipe;
+	u32 flags;
 
 	struct drm_lima_gem_submit_bo *bos;
 	struct ttm_validate_buffer *vbs;
@@ -57,10 +58,14 @@ struct lima_submit {
 	struct list_head duplicates;
 	struct list_head validated;
 
+	union drm_lima_gem_submit_dep *deps;
+	u32 nr_deps;
+
 	struct lima_sched_task *task;
 
 	uint32_t fence;
 	uint32_t done;
+	int sync_fd;
 };
 
 static inline struct lima_drm_priv *
