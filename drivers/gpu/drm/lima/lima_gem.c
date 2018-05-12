@@ -318,6 +318,25 @@ static int lima_gem_add_deps(struct lima_ctx_mgr *mgr, struct lima_submit *submi
 	return err;
 }
 
+static int lima_gem_get_sync_fd(struct dma_fence *fence)
+{
+	struct sync_file *sync_file;
+	int fd;
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0)
+		return fd;
+
+	sync_file = sync_file_create(fence);
+	if (!sync_file) {
+		put_unused_fd(fd);
+		return -ENOMEM;
+	}
+
+	fd_install(fd, sync_file->file);
+	return fd;
+}
+
 int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
 {
 	int i, err = 0;
@@ -372,23 +391,12 @@ int lima_gem_submit(struct drm_file *file, struct lima_submit *submit)
 	}
 
 	if (submit->flags & LIMA_SUBMIT_FLAG_SYNC_FD_OUT) {
-		struct sync_file *sync_file;
-		int fd;
-
-		fd = get_unused_fd_flags(O_CLOEXEC);
+		int fd = lima_gem_get_sync_fd(
+			&submit->task->base.s_fence->finished);
 		if (fd < 0) {
 			err = fd;
 			goto out2;
 		}
-
-		sync_file = sync_file_create(
-			&submit->task->base.s_fence->finished);
-		if (!sync_file) {
-			put_unused_fd(fd);
-			err = -ENOMEM;
-			goto out2;
-		}
-		fd_install(fd, sync_file->file);
 		submit->sync_fd = fd;
 	}
 
