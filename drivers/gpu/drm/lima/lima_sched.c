@@ -212,7 +212,7 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 					     struct dma_fence *fence,
 					     uint32_t *done)
 {
-	uint32_t seq, idx, i, n;
+	uint32_t seq, idx, i;
 	struct dma_fence *other;
 
 	mutex_lock(&context->lock);
@@ -231,10 +231,10 @@ static uint32_t lima_sched_context_add_fence(struct lima_sched_context *context,
 	context->sequence++;
 
 	/* get finished fence offset from seq */
-	n = min(seq + 1, (uint32_t)lima_sched_max_tasks);
-	for (i = 1; i < n; i++) {
+	for (i = 1; i < lima_sched_max_tasks; i++) {
 		idx = (seq - i) & (lima_sched_max_tasks - 1);
-		if (dma_fence_is_signaled(context->fences[idx]))
+		if (!context->fences[idx] ||
+		    dma_fence_is_signaled(context->fences[idx]))
 			break;
 	}
 
@@ -251,18 +251,18 @@ struct dma_fence *lima_sched_context_get_fence(
 {
 	struct dma_fence *fence;
 	int idx;
+	uint32_t max, min;
 
 	mutex_lock(&context->lock);
 
-	/* assume no overflow */
-	if (seq >= context->sequence) {
-		fence = ERR_PTR(-EINVAL);
-		goto out;
-	}
+	max = context->sequence - 1;
+	min = context->sequence - lima_sched_max_tasks;
 
-	if (seq + lima_sched_max_tasks < context->sequence) {
-		fence = NULL;
-		goto out;
+	/* handle overflow case */
+	if ((min < max && (seq < min || seq > max)) ||
+	    (min > max && (seq < min && seq > max))) {
+		    fence = NULL;
+		    goto out;
 	}
 
 	idx = seq & (lima_sched_max_tasks - 1);
