@@ -6,6 +6,10 @@
 #ifndef __LIMA_REGS_H__
 #define __LIMA_REGS_H__
 
+/* This file's register definition is collected from the
+ * official ARM Mali Utgard GPU kernel driver source code
+ */
+
 /* PMU regs */
 #define LIMA_PMU_POWER_UP                  0x00
 #define LIMA_PMU_POWER_DOWN                0x04
