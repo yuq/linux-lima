@@ -224,8 +224,8 @@ int lima_gp_init(struct lima_ip *ip)
 	if (err)
 		return err;
 
-	err = devm_request_irq(dev->dev, ip->irq, lima_gp_irq_handler, 0,
-			       lima_ip_name(ip), ip);
+	err = devm_request_irq(dev->dev, ip->irq, lima_gp_irq_handler,
+			       IRQF_SHARED, lima_ip_name(ip), ip);
 	if (err) {
 		dev_err(dev->dev, "gp %s fail to request irq\n",
 			lima_ip_name(ip));
