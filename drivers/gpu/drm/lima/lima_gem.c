@@ -217,9 +217,7 @@ out:
 static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo,
 			    bool write, bool explicit)
 {
-	int i, err;
-	struct dma_fence *f;
-	u64 context = task->base.s_fence->finished.context;
+	int err = 0;
 
 	if (!write) {
 		err = reservation_object_reserve_shared(bo->tbo.resv);
@@ -233,31 +231,38 @@ static int lima_gem_sync_bo(struct lima_sched_task *task, struct lima_bo *bo,
 
 	/* implicit sync use bo fence in resv obj */
 	if (write) {
-		struct reservation_object_list *fobj =
-			reservation_object_get_list(bo->tbo.resv);
+		unsigned nr_fences;
+		struct dma_fence **fences;
+		int i;
 
-		if (fobj && fobj->shared_count > 0) {
-			for (i = 0; i < fobj->shared_count; i++) {
-				f = rcu_dereference_protected(
-					fobj->shared[i],
-					reservation_object_held(bo->tbo.resv));
-				if (f->context != context) {
-					err = lima_sched_task_add_dep(task, f);
-					if (err)
-						return err;
-				}
-			}
+		err = reservation_object_get_fences_rcu(
+			bo->tbo.resv, NULL, &nr_fences, &fences);
+		if (err || !nr_fences)
+			return err;
+
+		for (i = 0; i < nr_fences; i++) {
+			err = lima_sched_task_add_dep(task, fences[i]);
+			if (err)
+				break;
+		}
+
+		/* for error case free remaining fences */
+		for ( ; i < nr_fences; i++)
+			dma_fence_put(fences[i]);
+
+		kfree(fences);
+	}
+	else {
+		struct dma_fence *fence;
+		fence = reservation_object_get_excl_rcu(bo->tbo.resv);
+		if (fence) {
+			err = lima_sched_task_add_dep(task, fence);
+			if (err)
+				dma_fence_put(fence);
 		}
 	}
 
-	f = reservation_object_get_excl(bo->tbo.resv);
-	if (f) {
-		err = lima_sched_task_add_dep(task, f);
-		if (err)
-			return err;
-	}
-
-	return 0;
+	return err;
 }
 
 static int lima_gem_add_deps(struct lima_ctx_mgr *mgr, struct lima_submit *submit)
@@ -291,9 +296,10 @@ static int lima_gem_add_deps(struct lima_ctx_mgr *mgr, struct lima_submit *submi
 
 		if (fence) {
 			err = lima_sched_task_add_dep(submit->task, fence);
-			dma_fence_put(fence);
-			if (err)
+			if (err) {
+				dma_fence_put(fence);
 				break;
+			}
 		}
 	}
 

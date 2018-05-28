@@ -130,6 +130,10 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
 {
 	int i, new_dep = 4;
 
+	/* same context's fence is definitly earlier then this task */
+	if (fence->context == task->base.s_fence->finished.context)
+		return 0;
+
 	if (task->dep && task->num_dep == task->max_dep)
 		new_dep = task->max_dep * 2;
 
@@ -141,7 +145,6 @@ int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fenc
 		task->dep = dep;
 	}
 
-	dma_fence_get(fence);
 	for (i = 0; i < task->num_dep; i++) {
 		if (task->dep[i]->context == fence->context &&
 		    dma_fence_is_later(fence, task->dep[i])) {
