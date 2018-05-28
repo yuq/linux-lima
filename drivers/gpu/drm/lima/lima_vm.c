@@ -195,14 +195,46 @@ int lima_vm_bo_add(struct lima_vm *vm, struct lima_bo *bo)
 	return 0;
 }
 
+/* wait only fence of resv from task using vm */
+static int lima_vm_wait_resv(struct lima_vm *vm,
+			     struct reservation_object *resv)
+{
+	unsigned nr_fences;
+	struct dma_fence **fences;
+	int i;
+	long err;
+
+	err = reservation_object_get_fences_rcu(resv, NULL, &nr_fences, &fences);
+	if (err || !nr_fences)
+		return err;
+
+	for (i = 0; i < nr_fences; i++) {
+		struct drm_sched_fence *sf = to_drm_sched_fence(fences[i]);
+		if (sf && sf->owner == vm)
+			err |= dma_fence_wait(fences[i], false);
+		dma_fence_put(fences[i]);
+	}
+
+	kfree(fences);
+	return err;
+}
+
 int lima_vm_bo_del(struct lima_vm *vm, struct lima_bo *bo)
 {
 	struct lima_bo_va *bo_va;
 	struct lima_bo_va_mapping *mapping, *tmp;
+	int err;
 
 	bo_va = lima_vm_bo_find(vm, bo);
 	if (--bo_va->ref_count > 0)
 		return 0;
+
+	/* wait bo idle before unmap it from vm in case user
+	 * space application is terminated when bo is busy.
+	 */
+	err = lima_vm_wait_resv(vm, bo->tbo.resv);
+	if (err)
+		dev_err(vm->dev->dev, "bo del fail to wait (%d)\n", err);
 
 	list_for_each_entry_safe(mapping, tmp, &bo_va->mapping, list) {
 	        lima_vm_unmap(vm, mapping);

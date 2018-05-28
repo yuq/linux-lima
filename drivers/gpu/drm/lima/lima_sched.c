@@ -112,7 +112,7 @@ int lima_sched_task_init(struct lima_sched_task *task,
 	int err;
 
 	err = drm_sched_job_init(&task->base, context->base.sched,
-				 &context->base, context);
+				 &context->base, vm);
 	if (err)
 		return err;
 
