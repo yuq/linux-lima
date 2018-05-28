@@ -123,7 +123,6 @@ int lima_sched_task_init(struct lima_sched_task *task,
 void lima_sched_task_fini(struct lima_sched_task *task)
 {
 	dma_fence_put(&task->base.s_fence->finished);
-	lima_vm_put(task->vm);
 }
 
 int lima_sched_task_add_dep(struct lima_sched_task *task, struct dma_fence *fence)
