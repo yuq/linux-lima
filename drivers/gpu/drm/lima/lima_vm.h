@@ -12,6 +12,10 @@
 #define LIMA_PAGE_MASK    (LIMA_PAGE_SIZE - 1)
 #define LIMA_PAGE_ENT_NUM (LIMA_PAGE_SIZE / sizeof(u32))
 
+#define LIMA_VM_NUM_PT_PER_BT_SHIFT 3
+#define LIMA_VM_NUM_PT_PER_BT (1 << LIMA_VM_NUM_PT_PER_BT_SHIFT)
+#define LIMA_VM_NUM_BT (LIMA_PAGE_ENT_NUM >> LIMA_VM_NUM_PT_PER_BT_SHIFT)
+
 #define LIMA_VA_RESERVE_START  0xFFF00000
 #define LIMA_VA_RESERVE_DLBU   LIMA_VA_RESERVE_START
 #define LIMA_VA_RESERVE_END    0x100000000
@@ -28,7 +32,7 @@ struct lima_vm {
 	struct lima_device *dev;
 
 	struct lima_bo *pd;
-	struct lima_bo *pt[LIMA_PAGE_ENT_NUM];
+	struct lima_bo *bts[LIMA_VM_NUM_BT];
 };
 
 int lima_vm_bo_map(struct lima_vm *vm, struct lima_bo *bo, u32 start);
