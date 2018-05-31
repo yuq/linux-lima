@@ -1,6 +1,5 @@
-/* Copyright 2018 Qiang Yu <yuq825@gmail.com>
- * SPDX-License-Identifier: MIT
- */
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/* Copyright 2018 Qiang Yu <yuq825@gmail.com> */
 
 #include <drm/drm_prime.h>
 
