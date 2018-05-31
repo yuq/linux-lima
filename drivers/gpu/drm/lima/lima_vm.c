@@ -98,6 +98,7 @@ static int lima_vm_map_page_table(struct lima_vm *vm, dma_addr_t *dma,
 				err = PTR_ERR(bt);
 				goto err_out;
 			}
+			memset(bt, 0, LIMA_PAGE_SIZE << LIMA_VM_NUM_PT_PER_BT_SHIFT);
 
 			vm->bts[pbe] = bt_bo;
 			pd = lima_bo_kmap(vm->pd);
@@ -286,6 +287,7 @@ struct lima_vm *lima_vm_create(struct lima_device *dev)
 	pd = lima_bo_kmap(vm->pd);
 	if (IS_ERR(pd))
 		goto err_out1;
+	memset(pd, 0, LIMA_PAGE_SIZE);
 
 	if (dev->dlbu_cpu) {
 		int err = lima_vm_map_page_table(
