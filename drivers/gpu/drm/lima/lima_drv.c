@@ -68,7 +68,7 @@ static int lima_ioctl_gem_create(struct drm_device *dev, void *data, struct drm_
 	if (args->pad)
 		return -EINVAL;
 
-	if (args->flags)
+	if (args->flags & ~(LIMA_BO_FLAG_HEAP))
 		return -EINVAL;
 
 	if (args->size == 0)
