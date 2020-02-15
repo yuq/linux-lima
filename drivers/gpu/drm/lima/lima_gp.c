@@ -230,9 +230,11 @@ static int lima_gp_task_recover(struct lima_sched_pipe *pipe)
 			return ret;
 	}
 
+	f[LIMA_GP_PLBU_ALLOC_END_ADDR >> 2] =
+		f[LIMA_GP_PLBU_ALLOC_START_ADDR >> 2] + task->heap->heap_size;
+
 	gp_write(LIMA_GP_INT_MASK, LIMA_GP_IRQ_MASK_USED);
-	gp_write(LIMA_GP_PLBU_ALLOC_END_ADDR,
-		 f[LIMA_GP_PLBU_ALLOC_START_ADDR >> 2] + task->heap->heap_size);
+	gp_write(LIMA_GP_PLBU_ALLOC_END_ADDR, f[LIMA_GP_PLBU_ALLOC_END_ADDR >> 2]);
 	gp_write(LIMA_GP_CMD, LIMA_GP_CMD_UPDATE_PLBU_ALLOC);
 	return 0;
 }
