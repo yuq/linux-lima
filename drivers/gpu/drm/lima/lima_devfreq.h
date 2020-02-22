@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright 2019 Martin Blumenstingl <martin.blumenstingl@googlemail.com> */
+
+#ifndef __LIMA_DEVFREQ_H__
+#define __LIMA_DEVFREQ_H__
+
+#include <linux/spinlock.h>
+#include <linux/ktime.h>
+
+struct devfreq;
+struct opp_table;
+struct thermal_cooling_device;
+
+struct lima_device;
+
+struct lima_devfreq {
+	struct devfreq *devfreq;
+	struct opp_table *clkname_opp_table;
+	struct opp_table *regulators_opp_table;
+	struct thermal_cooling_device *cooling;
+	bool opp_added;
+
+	ktime_t busy_time;
+	ktime_t idle_time;
+	ktime_t time_last_update;
+	int busy_count;
+	/*
+	 * Protect busy_time, idle_time and time_last_update because
+	 * these can be updated concurrently from multi kernel threads.
+	 */
+	spinlock_t lock;
+};
+
+int lima_devfreq_init(struct lima_device *ldev);
+void lima_devfreq_fini(struct lima_device *ldev);
+
+void lima_devfreq_record_busy(struct lima_devfreq *devfreq);
+void lima_devfreq_record_idle(struct lima_devfreq *devfreq);
+
+#endif
