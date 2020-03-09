@@ -128,6 +128,23 @@
 			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
 	};
 
+	gpu_opp_table: gpu-opp-table {
+		compatible = "operating-points-v2";
+
+		opp-120000000 {
+			opp-hz = /bits/ 64 <120000000>;
+		};
+		opp-312000000 {
+			opp-hz = /bits/ 64 <312000000>;
+		};
+		opp-432000000 {
+			opp-hz = /bits/ 64 <432000000>;
+		};
+		opp-576000000 {
+			opp-hz = /bits/ 64 <576000000>;
+		};
+	};
+
 	soc {
 		deinterlace: deinterlace@1400000 {
 			compatible = "allwinner,sun8i-h3-deinterlace";
@@ -205,8 +222,7 @@
 			clock-names = "bus", "core";
 			resets = <&ccu RST_BUS_GPU>;
 
-			assigned-clocks = <&ccu CLK_GPU>;
-			assigned-clock-rates = <384000000>;
+			operating-points-v2 = <&gpu_opp_table>;
 		};
 
 		ths: thermal-sensor@1c25000 {
