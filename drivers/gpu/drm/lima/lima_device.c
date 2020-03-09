@@ -213,6 +213,27 @@ static void lima_fini_ip(struct lima_device *ldev, int index)
 		desc->fini(ip);
 }
 
+static int lima_resume_ip(struct lima_device *ldev, int index)
+{
+	struct lima_ip_desc *desc = lima_ip_desc + index;
+	struct lima_ip *ip = ldev->ip + index;
+	int ret = 0;
+
+	if (ip->present)
+		ret = desc->resume(ip);
+
+	return ret;
+}
+
+static void lima_suspend_ip(struct lima_device *ldev, int index)
+{
+	struct lima_ip_desc *desc = lima_ip_desc + index;
+	struct lima_ip *ip = ldev->ip + index;
+
+	if (ip->present)
+		desc->suspend(ip);
+}
+
 static int lima_init_gp_pipe(struct lima_device *dev)
 {
 	struct lima_sched_pipe *pipe = dev->pipe + lima_pipe_gp;
@@ -407,4 +428,48 @@ void lima_device_fini(struct lima_device *ldev)
 	lima_regulator_fini(ldev);
 
 	lima_clk_fini(ldev);
+}
+
+int lima_device_resume(struct device *dev)
+{
+	struct lima_device *ldev = dev_get_drvdata(dev);
+	int i, err;
+
+	for (i = 0; i < lima_ip_num; i++) {
+		err = lima_resume_ip(ldev, i);
+		if (err)
+			goto err_out;
+	}
+
+	err = lima_devfreq_resume(&ldev->devfreq);
+	if (err)
+		goto err_out;
+
+	return 0;
+
+err_out:
+	while (--i >= 0)
+		lima_suspend_ip(ldev, i);
+	return err;
+}
+
+int lima_device_suspend(struct device *dev)
+{
+	struct lima_device *ldev = dev_get_drvdata(dev);
+	int i, err;
+
+	/* check any task running */
+	for (i = 0; i < lima_pipe_num; i++) {
+		if (atomic_read(&ldev->pipe[i].base.hw_rq_count))
+			return -EBUSY;
+	}
+
+	err = lima_devfreq_suspend(&ldev->devfreq);
+	if (err)
+		return err;
+
+	for (i = lima_ip_num - 1; i >= 0; i--)
+		lima_suspend_ip(ldev, i);
+
+	return 0;
 }
